@@ -1,0 +1,31 @@
+# Synology / generic Docker deployment.
+#   1. cp config.example.yaml config.yaml  and edit ports
+#   2. docker compose up -d
+# Find your adapters with:  docker compose run --rm solardash solardash probe list
+services:
+  solardash:
+    build: .
+    image: solardash:latest
+    container_name: solardash
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    # Option A (simple): pass the individual serial devices. Names can shift
+    # after a USB re-enumeration; prefer /dev/serial/by-id or by-path paths.
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/ttyACM1:/dev/ttyACM1
+      - /dev/ttyACM2:/dev/ttyACM2
+      - /dev/ttyACM3:/dev/ttyACM3
+    # Option B: if your Docker host exposes stable symlinks, map the directory
+    # and use /dev/serial/by-path/... names in config.yaml:
+    #   - /dev/serial:/dev/serial
+    #   (requires `privileged: true` on most Synology DSM versions)
+    environment:
+      - TZ=America/Los_Angeles
+      - SOLARDASH_LOG_LEVEL=INFO
+    # Uncomment to run without hardware:
+    #   - SOLARDASH_SIMULATE=true

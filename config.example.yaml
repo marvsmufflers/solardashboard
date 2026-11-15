@@ -1,0 +1,65 @@
+# solardash configuration. Copy to config.yaml and edit.
+# Serial device names: prefer the stable /dev/serial/by-id/... or by-path
+# symlinks over /dev/ttyACMn, which renumber after a USB hiccup.
+
+simulate: false          # true = run with fake devices (no hardware needed)
+log_level: INFO
+
+inverter:
+  enabled: true
+  name: EG4 6000XP
+  port: /dev/ttyACM0     # RS485 to the inverter's dongle/INV485 port
+  baud: 19200
+  unit: 1
+  poll_interval: 5       # seconds between live-data polls
+  settings_poll_interval: 60
+  allow_writes: false    # must be true before any setting can be changed from the UI/API
+
+batteries:               # one entry per RS485 link (Solar Assistant "USB JBD RS485")
+  - name: Battery 1
+    port: /dev/ttyACM1
+    baud: 9600
+    capacity_ah: 100
+  - name: Battery 2
+    port: /dev/ttyACM2
+    baud: 9600
+    capacity_ah: 100
+  - name: Battery 3
+    port: /dev/ttyACM3
+    baud: 9600
+    capacity_ah: 100
+
+chargeverter:
+  enabled: false
+  mode: sniff            # sniff = listen only | emulate = answer the Chargeverter as the battery | off
+  port: /dev/ttyUSB0     # RS485 adapter wired to the Chargeverter BMS RJ45: pin 1 = B, pin 2 = A
+  baud: 9600
+  parity: N
+  power_threshold_w: 150 # derived Chargeverter output below this is reported as 0
+  emulate:
+    soh: 100
+    charge_voltage: 56.0
+    charge_limit_a: 100
+    discharge_limit_a: 100
+    stale_after: 30      # stop answering if battery data is older than this (fail-safe)
+    soc_offset: 0
+
+history:
+  path: data/solardash.db
+  sample_interval: 15
+  retention_days: 14     # raw samples; hourly rollups are kept forever
+
+web:
+  host: 0.0.0.0
+  port: 8080
+
+mqtt:
+  enabled: false
+  host: 192.168.1.10
+  port: 1883
+  username: ""
+  password: ""
+  prefix: solar_assistant   # topics mirror Solar Assistant: <prefix>/inverter_1/pv_power/state ...
+  ha_discovery: true
+  ha_prefix: homeassistant
+  publish_interval: 5

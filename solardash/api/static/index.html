@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>solardash</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/chart.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">☀ solardash</div>
+  <nav>
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="batteries">Batteries</button>
+    <button data-tab="inverter">Inverter</button>
+    <button data-tab="chargeverter">Chargeverter</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="system">System</button>
+  </nav>
+  <div class="conn" id="conn">connecting…</div>
+</header>
+
+<main>
+<section id="tab-overview" class="tab active">
+  <div class="tiles">
+    <div class="tile pv"><div class="label">Solar</div><div class="value" id="t-pv">–</div><div class="sub" id="t-pv-sub"></div></div>
+    <div class="tile load"><div class="label">Load</div><div class="value" id="t-load">–</div><div class="sub" id="t-load-sub"></div></div>
+    <div class="tile batt"><div class="label">Battery</div><div class="value" id="t-soc">–</div><div class="sub" id="t-batt-sub"></div><div class="bar"><div id="t-soc-bar"></div></div></div>
+    <div class="tile grid"><div class="label" id="t-grid-label">Grid / Generator</div><div class="value" id="t-grid">–</div><div class="sub" id="t-grid-sub"></div></div>
+    <div class="tile cv"><div class="label">Chargeverter</div><div class="value" id="t-cv">–</div><div class="sub" id="t-cv-sub"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>Power</h2>
+      <div class="ranges" id="ranges">
+        <button data-range="1h">1h</button><button data-range="6h">6h</button><button data-range="24h" class="active">24h</button><button data-range="7d">7d</button><button data-range="30d">30d</button>
+      </div></div>
+    <div class="chart "><canvas id="chart-power"></canvas></div>
+  </div>
+  <div class="two">
+    <div class="card"><h2>State of charge</h2><div class="chart tall"><canvas id="chart-soc"></canvas></div></div>
+    <div class="card"><h2>Energy today</h2><div id="energy-today" class="kv"></div></div>
+  </div>
+</section>
+
+<section id="tab-batteries" class="tab">
+  <div class="card"><h2>Bank</h2><div id="bank" class="kv"></div></div>
+  <div id="packs" class="packs"></div>
+  <div class="card"><h2>Pack temperatures &amp; cell spread (24h)</h2><div class="chart tall"><canvas id="chart-batt"></canvas></div></div>
+</section>
+
+<section id="tab-inverter" class="tab">
+  <div class="card"><h2>Live</h2><div id="inv-live" class="kv"></div></div>
+  <div class="two">
+    <div class="card"><h2>Energy</h2><div id="inv-energy" class="kv"></div></div>
+    <div class="card"><h2>BMS as seen by inverter</h2><div id="inv-bms" class="kv"></div></div>
+  </div>
+  <div class="card"><h2>Diagnostics</h2><div id="inv-diag" class="kv"></div></div>
+</section>
+
+<section id="tab-chargeverter" class="tab">
+  <div class="card"><h2>Chargeverter GC</h2>
+    <p class="muted">The Chargeverter cannot be polled. It is a Modbus master that asks "the battery" for SOC every half second
+      (<code>01 03 00 13 00 11</code> at 9600 baud on RJ45 pins 1/2). solardash can listen to that bus, and in
+      <b>emulate</b> mode answer it with the real pack data so the charger stops showing LOST and can start/stop the generator on SOC.</p>
+    <div id="cv" class="kv"></div></div>
+  <div class="card"><h2>Derived output</h2>
+    <p class="muted">Chargeverter DC power = (sum of pack currents × voltage from the BMSs) − (inverter battery charge − discharge power).
+      Below the configured threshold it is reported as 0.</p>
+    <div class="chart "><canvas id="chart-cv"></canvas></div></div>
+</section>
+
+<section id="tab-settings" class="tab">
+  <div class="card"><div class="card-head"><h2>Inverter settings</h2><div><span id="settings-mode" class="pill"></span> <button id="settings-refresh">Re-read</button></div></div>
+    <p class="muted">Values are read from the inverter's holding registers. Writes are range-checked, applied with
+      read-modify-write for bit fields, and read back for verification. They are only enabled when
+      <code>inverter.allow_writes: true</code> is set in the config file.</p>
+    <div id="settings"></div></div>
+</section>
+
+<section id="tab-system" class="tab">
+  <div class="card"><h2>Devices</h2><div id="devices"></div></div>
+  <div class="two">
+    <div class="card"><h2>Events</h2><div id="events" class="events"></div></div>
+    <div class="card"><h2>History database</h2><div id="dbstats" class="kv"></div></div>
+  </div>
+</section>
+</main>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
