@@ -138,11 +138,18 @@ solardash therefore offers two modes on a dedicated RS485 adapter wired to that 
 
 ## 4. Weather, PV forecast and generator planning
 
+* **Open-Meteo** (`weather/openmeteo.py`): hourly `shortwave_radiation` (GHI), direct/diffuse,
+  cloud, temperature, snowfall for 7 days plus 2 past days, free and keyless. Values are means over
+  the preceding hour and are re-keyed to hour start. This is the primary PV input: `pv = k_clear ×
+  GHI × bias`, no cloud-to-irradiance heuristic needed. Forecast GHI is logged (`weather/ghi_forecast`).
 * **Weather Underground** (`weather/wunderground.py`): the cabin's PWS gives current conditions every
   5 min (including `solarRadiation` W/m² when the station has a pyranometer) and a 5-day forecast with
-  day/night cloud cover. Field names follow TWC's schemas; `solardash probe weather` dumps raw
-  responses to verify against a real account (api.weather.com was not reachable from the development
-  environment).
+  day/night cloud cover, used as the fallback source and for the narrative. Field names follow TWC's
+  schemas; `solardash probe weather` dumps raw responses to verify against a real account
+  (api.weather.com was not reachable from the development environment).
+* **Occupancy** (`occupancy:` config, kv `occupancy_mode`, sample `total/occupancy`): load profiles are
+  learned per mode over 60 days; the planner uses the current mode's profile. Load is the dominant
+  uncertainty for a cabin, so this matters more than solar model refinements.
 * **Clear-sky model** (`weather/solar.py`): NOAA solar position + Haurwitz GHI, hourly averages.
 * **PV model** (`forecast/model.py`): `pv = k_clear × GHI_clear × (1 − 0.75·cloud^3.4) × bias`.
   `k_clear` is the 90th percentile of pv/GHI_clear over 30 days of daylight hours (what the array does
@@ -151,11 +158,16 @@ solardash therefore offers two modes on a dedicated RS485 adapter wired to that 
   (per measured W/m²) gives an "expected now" so under-performance (snow, shading) is visible.
   Load profile: median load by local hour over 14 days.
 * **Planner** (`forecast/planner.py`): 15-minute SOC simulation over 72 h; if SOC would cross
-  floor + margin, searches start times from the crossing backwards (latest feasible wins), sizes the
-  run to the drawdown that follows it (capped at `soc_target`, min run length), rejects starts whose
-  run touches quiet hours, flags when a further run will be needed, and while a generator is running
-  advises the stop SOC. Output is advisory: `plan/recommended_now`, `plan/stop_recommended`, times
-  and reason on the API and MQTT.
+  floor + margin, searches start times from the crossing backwards (latest feasible wins) and sizes
+  the run to the drawdown that follows it. The stop point is `soc_target` (50 %, the owner's routine)
+  unless the bank would need another run within `storm_lookahead_h` even after charging to it; then
+  `soc_target_storm` (80 %) is allowed so one longer run replaces several short ones. Min/max run
+  length and quiet hours are enforced, a follow-up run is flagged, and while a generator is running
+  the stop SOC is advised. Output is advisory: `plan/recommended_now`, `plan/stop_recommended`,
+  times and reason on the API and MQTT.
+* **Scorecard** (`forecast/scorecard.py`): per-day starts, run hours, inferred kWh, kWh/h, share of
+  run time ≥ 85 % of peak Chargeverter output, hours at/below the floor, curtailed solar (full bank
+  while the clear-sky model says the array could have made ≥ 30 % more).
 
 ## Architecture
 

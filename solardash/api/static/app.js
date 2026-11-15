@@ -79,7 +79,21 @@
   }
 
   let genTotals = {}, genSelectBuilt = false;
+  let occBuilt = false;
+  async function initOccupancy() {
+    try {
+      const d = await (await fetch("/api/occupancy")).json();
+      const sel = $("#occ-select");
+      if (!d.enabled) { $("#occ-wrap").style.display = "none"; return; }
+      sel.innerHTML = d.modes.map((m) => `<option value="${m}">${m}</option>`).join(""); sel.value = d.mode; occBuilt = true;
+      sel.addEventListener("change", async () => {
+        const r = await fetch("/api/occupancy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: sel.value }) });
+        toast(r.ok ? `Cabin set to ${sel.value}; planner will use that load profile` : "Could not set occupancy");
+      });
+    } catch (e) {}
+  }
   function renderGenSelect(tot) {
+    if (occBuilt && tot.occupancy && document.activeElement !== $("#occ-select")) $("#occ-select").value = tot.occupancy;
     const sel = $("#gen-select"); const gens = tot.generators || [];
     if (!genSelectBuilt && gens.length) {
       sel.innerHTML = gens.map((g) => `<option value="${g.name}">${g.name}</option>`).join("");
@@ -261,9 +275,13 @@
         ["Start", plan.start_at ? fmtDT(plan.start_at) : "–"], ["Stop", plan.end_at ? fmtDT(plan.end_at) : "–"], ["Run length", plan.needed ? fmt(plan.run_h, 1, "h") : "–"],
         ["SOC start → end", plan.needed ? `${plan.start_soc ?? f.soc_now} → ${plan.end_soc} %` : "–"], ["Energy from generator", plan.needed ? fmt(plan.energy_kwh, 1, "kWh") : "–"],
         ["Lowest SOC without generator", `${plan.min_soc_without} % at ${plan.min_soc_at ? fmtDT(plan.min_soc_at) : "–"}`], ["Next run after this", plan.next_deficit_at ? fmtDT(plan.next_deficit_at) : "none in horizon"],
-        ["Battery used for planning", fmt(f.params.battery_kwh, 1, "kWh")], ["Floor / target", `${f.params.soc_floor} % / ${f.params.soc_target} %`],
+        ["Battery used for planning", fmt(f.params.battery_kwh, 1, "kWh")], ["Floor / target / storm target", `${f.params.soc_floor} / ${f.params.soc_target} / ${f.params.soc_target_storm} %`],
+        ["Load profile in use", f.occupancy ? `${f.occupancy}${f.model.load_profiles && f.model.load_profiles[f.occupancy] ? " (learned)" : " (no data for this mode yet, using overall)"}` : "overall"],
       ]);
     }
+    const src = f.sources || {}; const hb = src.hours_by_source || {};
+    $("#forecast-source").textContent = hb.openmeteo ? `Open-Meteo irradiance ${hb.openmeteo} h${hb.wunderground ? ` · WU cloud ${hb.wunderground} h` : ""}${hb.climatology ? ` · assumed ${hb.climatology} h` : ""}` : hb.wunderground ? "Wunderground cloud cover" : (src.openmeteo_error ? "Open-Meteo error: " + src.openmeteo_error : "no forecast source");
+    $("#forecast-source").className = "pill " + (hb.openmeteo ? "ok" : hb.wunderground ? "" : "warn");
     const m = f.model;
     kv($("#pv-model"), [
       ["Clear-sky capacity", `${m.k_clear} kW per kW/m² (${m.k_clear_source}, ${m.samples_clear} h)`], ["Forecast bias correction", `×${m.bias} (${m.samples_bias} h)`],
@@ -272,10 +290,11 @@
       ["Load profile", `${m.load_profile_source}, ${m.load_days} days, avg ${(m.load_profile_kw.reduce((a, b) => a + b, 0) / 24).toFixed(2)} kW`], ["Weather days in forecast", f.weather_days],
       ["Model refreshed", ago((Date.now() / 1000) - m.fitted_at)],
     ]);
-    $("#forecast-days").innerHTML = `<table><tr><th>Day</th><th>Cloud</th><th>Solar</th><th>Load</th><th>Net</th><th>Weather</th></tr>` + f.days.map((d, i) => {
+    $("#forecast-days").innerHTML = `<table><tr><th>Day</th><th>Cloud</th><th>Solar</th><th>Load</th><th>Net</th><th>Snow / low</th><th>Weather</th></tr>` + f.days.map((d, i) => {
       const w = (state?.weather?.forecast || []).find((x) => x.date === d.date);
-      return `<tr><td>${new Date(d.date + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}${d.hours_covered < 24 ? ` <span class="muted">(${d.hours_covered} h)</span>` : ""}</td><td>${Math.round(d.cloud_avg * 100)} %</td><td>${d.pv_kwh} kWh</td><td>${d.load_kwh} kWh</td><td style="color:${d.net_kwh >= 0 ? "var(--ok)" : "var(--bad)"}">${d.net_kwh >= 0 ? "+" : ""}${d.net_kwh} kWh</td><td class="muted">${w ? w.narrative : ""}</td></tr>`;
+      return `<tr><td>${new Date(d.date + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}${d.hours_covered < 24 ? ` <span class="muted">(${d.hours_covered} h)</span>` : ""}</td><td>${Math.round(d.cloud_avg * 100)} %</td><td>${d.pv_kwh} kWh</td><td>${d.load_kwh} kWh</td><td style="color:${d.net_kwh >= 0 ? "var(--ok)" : "var(--bad)"}">${d.net_kwh >= 0 ? "+" : ""}${d.net_kwh} kWh</td><td>${d.snow_cm ? d.snow_cm + " cm" + (d.snow_risk ? " ⚠ panels" : "") : "–"}${d.temp_min_c != null ? ` / ${d.temp_min_c.toFixed(0)} °C` : ""}</td><td class="muted">${w ? w.narrative : d.source}</td></tr>`;
     }).join("") + "</table>";
+    loadScorecard();
     // chart
     const labels = f.hours.map((h) => h.ts);
     const hourly = (pts) => { const m = new Map(); (pts || []).forEach(([t, s]) => { const k = Math.round(t / 3600) * 3600; if (!m.has(k)) m.set(k, s); }); return m; };
@@ -297,6 +316,15 @@
       charts["chart-forecast"] = new Chart(ctx, { data: { labels, datasets: ds }, options: o });
     }
     range = saveRange;
+  }
+  async function loadScorecard() {
+    try {
+      const rows = await (await fetch("/api/scorecard?days=14")).json();
+      if (!rows.length) { $("#scorecard").innerHTML = '<div class="muted">No history yet.</div>'; return; }
+      const pct = (v) => (v == null ? "–" : Math.round(v * 100) + " %");
+      $("#scorecard").innerHTML = `<table><tr><th>Day</th><th>Starts</th><th>Run</th><th>kWh</th><th>kWh / h</th><th>Full current</th><th>At floor</th><th>SOC min / max</th><th>Curtailed solar</th></tr>` +
+        rows.map((r) => `<tr><td>${r.date}${r.partial_day ? ' <span class="muted">(so far)</span>' : ""}</td><td>${r.starts}</td><td>${r.run_h.toFixed(1)} h</td><td>${r.kwh}</td><td>${r.kwh_per_run_h ?? "–"}</td><td>${pct(r.full_current_share)}</td><td style="color:${r.hours_at_floor > 0 ? "var(--bad)" : "inherit"}">${r.hours_at_floor.toFixed(1)} h</td><td>${r.soc_min ?? "–"} / ${r.soc_max ?? "–"}</td><td style="color:${r.curtailed_kwh > 1 ? "var(--warn)" : "inherit"}">${r.curtailed_kwh} kWh</td></tr>`).join("") + "</table>";
+    } catch (e) { $("#scorecard").innerHTML = '<div class="muted">unavailable</div>'; }
   }
   $("#forecast-recompute").addEventListener("click", async () => { const r = await fetch("/api/forecast/recompute", { method: "POST" }); toast(r.ok ? "Forecast recomputed" : "Recompute failed"); loadForecast(); });
 
@@ -344,6 +372,6 @@
     kv($("#dbstats"), [["Raw samples", st.raw_rows], ["Hourly rows", st.hourly_rows], ["Size", (st.db_bytes / 1048576).toFixed(1) + " MB"], ["Raw retention", st.retention_days + " days"]]);
   }
 
-  connect(); loadPowerChart(); loadSocChart(); loadGenTotals();
+  connect(); loadPowerChart(); loadSocChart(); loadGenTotals(); initOccupancy();
   setInterval(() => { if (document.querySelector("#tab-overview").classList.contains("active")) { loadPowerChart(); loadSocChart(); } }, 60000);
 })();

@@ -33,6 +33,10 @@ class GeneratorSelect(BaseModel):
     name: str
 
 
+class OccupancySet(BaseModel):
+    mode: str
+
+
 class GeneratorSignal(BaseModel):
     running: bool | None = None
     contactor: bool | None = None
@@ -140,6 +144,23 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         if svc.forecast is None:
             raise HTTPException(503, "forecast task not running")
         return await asyncio.to_thread(svc.forecast.recompute)
+
+    @app.get("/api/occupancy")
+    async def api_occupancy():
+        return {"mode": svc.occupancy_mode(), "modes": cfg.occupancy.modes, "enabled": cfg.occupancy.enabled}
+
+    @app.put("/api/occupancy")
+    async def api_occupancy_set(body: OccupancySet):
+        try:
+            return {"mode": await asyncio.to_thread(svc.set_occupancy, body.mode)}
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/scorecard")
+    async def api_scorecard(days: int = 14):
+        if svc.forecast is None:
+            raise HTTPException(503, "forecast task not running")
+        return await asyncio.to_thread(svc.forecast.scorecard, days)
 
     @app.get("/api/history/metrics")
     async def api_history_metrics():

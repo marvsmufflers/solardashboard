@@ -19,6 +19,7 @@
     <button data-tab="settings">Settings</button>
     <button data-tab="system">System</button>
   </nav>
+  <label class="occ" id="occ-wrap" title="Cabin occupancy drives which load profile the planner uses">Cabin: <select id="occ-select"></select></label>
   <div class="conn" id="conn">connecting…</div>
 </header>
 
@@ -47,7 +48,7 @@
 <section id="tab-forecast" class="tab">
   <div class="card" id="plan-card"><div class="card-head"><h2>Generator plan</h2><span id="plan-badge" class="pill"></span></div>
     <p id="plan-reason" class="muted"></p><div id="plan-kv" class="kv"></div></div>
-  <div class="card"><div class="card-head"><h2>Next 72 hours</h2><button id="forecast-recompute">Recompute</button></div>
+  <div class="card"><div class="card-head"><h2>Next 72 hours</h2><div><span id="forecast-source" class="pill"></span> <button id="forecast-recompute">Recompute</button></div></div>
     <p class="muted">Predicted solar (bars), forecast battery SOC without the generator (dashed) and with the planned run (solid).</p>
     <div class="chart"><canvas id="chart-forecast"></canvas></div></div>
   <div class="two">
@@ -55,6 +56,9 @@
     <div class="card"><h2>PV model</h2><div id="pv-model" class="kv"></div></div>
   </div>
   <div class="card"><h2>Daily outlook</h2><div id="forecast-days"></div></div>
+  <div class="card"><h2>Generator scorecard (last 14 days)</h2>
+    <p class="muted">Is the strategy paying off? Fewer starts, more of the run at full Chargeverter current, no hours at the floor, and little curtailed solar (a full bank on a sunny morning means last night's run was too long).</p>
+    <div id="scorecard"></div></div>
 </section>
 
 <section id="tab-batteries" class="tab">

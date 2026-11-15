@@ -76,7 +76,7 @@ async def test_full_stack(cfg):
             series = r.json()["series"]
             assert series["total/pv_power"] and series["battery_1/soc"]
             r = await c.get("/api/devices")
-            assert all(v["connected"] for v in r.json().values())
+            assert all(v["connected"] for k, v in r.json().items() if not k.startswith("weather:"))
             r = await c.get("/api/chargeverter")
             assert r.json()["state"]["charger_online"] is True
             r = await c.get("/api/generators")
@@ -115,6 +115,18 @@ async def test_full_stack(cfg):
             assert f["available"] and len(f["hours"]) >= 72 and f["days"] and f["weather_days"] == 5
             assert f["model"]["k_clear_source"] == "configured"
             assert f["plan"] is not None and "reason" in f["plan"]
+            assert f["sources"]["openmeteo"] and f["sources"]["hours_by_source"]["openmeteo"] > 48
+            assert (await c.get("/api/devices")).json()["weather:openmeteo"]["connected"] is True
+            # occupancy
+            r = await c.get("/api/occupancy")
+            assert r.json()["mode"] == "away"
+            r = await c.put("/api/occupancy", json={"mode": "occupied"})
+            assert r.status_code == 200 and (await c.get("/api/occupancy")).json()["mode"] == "occupied"
+            assert (await c.put("/api/occupancy", json={"mode": "party"})).status_code == 404
+            f = (await c.post("/api/forecast/recompute")).json()
+            assert f["occupancy"] == "occupied"
+            r = await c.get("/api/scorecard?days=2")
+            assert r.status_code == 200 and isinstance(r.json(), list)
             r = await c.get("/api/weather")
             assert r.json()["current"]["solar_radiation"] is not None
             r = await c.get("/")

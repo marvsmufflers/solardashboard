@@ -10,6 +10,7 @@ from typing import Any, Callable
 from ..config import Config
 from ..core.state import DeviceHealth, SystemState
 from ..storage.sqlite import HistoryStore
+from ..weather.openmeteo import OpenMeteoClient, OpenMeteoForecast
 from ..weather.wunderground import DayForecast, WeatherError, WundergroundClient
 from .model import (
     PvModel,
@@ -22,6 +23,7 @@ from .model import (
     save_model,
 )
 from .planner import PlannerParams, parse_quiet_hours, plan_generator
+from .scorecard import scorecard
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +107,8 @@ class ForecastTask:
     """Fits the PV model, predicts PV/load, runs the planner. Works without
     weather data too (clear-sky × default cloud), just less accurately."""
 
-    def __init__(self, cfg: Config, state: SystemState, store: HistoryStore, weather: WeatherTask | None) -> None:
+    def __init__(self, cfg: Config, state: SystemState, store: HistoryStore, weather: WeatherTask | None,
+                 openmeteo_fetch: Callable[[str], dict] | None = None, occupancy_mode: Callable[[], str | None] | None = None) -> None:
         self.cfg = cfg
         self.state = state
         self.store = store
@@ -113,6 +116,14 @@ class ForecastTask:
         self.model: PvModel | None = load_model(store)
         self._stop = asyncio.Event()
         self._last_fit = 0.0
+        self.openmeteo_client = OpenMeteoClient(fetch=openmeteo_fetch)
+        self.openmeteo: OpenMeteoForecast | None = None
+        self._openmeteo_due = 0.0
+        self.openmeteo_error: str | None = None
+        self.occupancy_mode = occupancy_mode or (lambda: None)
+        self.health = DeviceHealth(name="Open-Meteo", kind="weather", port="api.open-meteo.com")
+        if cfg.weather.openmeteo_enabled:
+            state.devices["weather:openmeteo"] = self.health
         self.state.forecast = {"available": False, "reason": "not computed yet"}
 
     def _location(self) -> tuple[float, float] | None:
@@ -129,10 +140,34 @@ class ForecastTask:
         ah = self.state.derived.get("battery_capacity_ah") or self.state.inverter.get("battery_capacity_ah") or 300.0
         return round(ah * 51.2 / 1000.0, 2)
 
+    def refresh_openmeteo(self) -> None:
+        loc = self._location()
+        if loc is None or not self.cfg.weather.openmeteo_enabled:
+            return
+        try:
+            self.openmeteo = self.openmeteo_client.forecast(loc[0], loc[1], forecast_days=self.cfg.weather.openmeteo_days, past_days=2)
+            self.openmeteo_error = None
+            self.health.connected = True
+            self.health.last_ok = time.time()
+            self.health.last_error = None
+            self.health.poll_count += 1
+            # log the forecast GHI so the model can be checked against it later
+            rows = {h.ts: h.ghi for h in self.openmeteo.hours if h.ghi is not None}
+            for ts, g in rows.items():
+                self.store.insert(ts, {"weather/ghi_forecast": g})
+        except Exception as e:  # noqa: BLE001
+            self.openmeteo_error = f"{type(e).__name__}: {e}"
+            self.health.connected = False
+            self.health.error_count += 1
+            self.health.last_error = self.openmeteo_error
+            log.warning("open-meteo: %s", self.openmeteo_error)
+        self.health.stats = {"api_calls": self.openmeteo_client.calls}
+
     def params(self) -> PlannerParams:
         pc = self.cfg.planner
         return PlannerParams(
-            soc_floor=pc.soc_floor, soc_target=pc.soc_target, soc_margin=pc.soc_margin,
+            soc_floor=pc.soc_floor, soc_target=pc.soc_target, soc_target_storm=pc.soc_target_storm,
+            storm_lookahead_h=pc.storm_lookahead_h, soc_margin=pc.soc_margin,
             generator_dc_kw=pc.generator_dc_kw, charge_efficiency=pc.charge_efficiency, min_run_h=pc.min_run_h,
             max_run_h=pc.max_run_h, quiet_hours=parse_quiet_hours(pc.quiet_hours), horizon_h=pc.horizon_h,
             battery_kwh=self._battery_kwh(),
@@ -145,14 +180,19 @@ class ForecastTask:
             self.state.forecast = {"available": False, "reason": "no location: set weather.latitude/longitude (or enable the weather station)"}
             return self.state.forecast
         lat, lon = loc
+        if time.monotonic() >= self._openmeteo_due:
+            self.refresh_openmeteo()
+            self._openmeteo_due = time.monotonic() + self.cfg.weather.openmeteo_interval
+        modes = self.cfg.occupancy.modes if self.cfg.occupancy.enabled else None
         if self.model is None or now - self._last_fit > 3600:
-            self.model = fit_model(self.store, lat, lon, self.cfg.planner.pv_kw_peak, now=now, previous=self.model)
+            self.model = fit_model(self.store, lat, lon, self.cfg.planner.pv_kw_peak, now=now, previous=self.model, modes=modes)
             save_model(self.store, self.model)
             self._last_fit = now
         days = self.weather.forecast if self.weather is not None else []
-        hours = predict_hours(self.model, lat, lon, days, hour_floor(now), self.cfg.planner.horizon_h + 1)
+        mode = self.occupancy_mode()
+        hours = predict_hours(self.model, lat, lon, days, hour_floor(now), self.cfg.planner.horizon_h + 1,
+                              openmeteo=self.openmeteo.by_ts() if self.openmeteo else None, mode=mode)
         # log predictions for later bias evaluation (next 48 h only)
-        self.store.insert(0, {})  # no-op keeps API symmetric
         for h in hours[:48]:
             self.store.insert(h.ts, {"forecast/pv_power_pred": h.pv_kw * 1000.0})
         soc = self.state.derived.get("battery_state_of_charge")
@@ -178,6 +218,13 @@ class ForecastTask:
             "expected_now_kw": exp_now,
             "actual_now_kw": round((self.state.inverter.get("pv_power") or 0) / 1000.0, 3) if self.state.inverter else None,
             "weather_days": len(days),
+            "occupancy": mode,
+            "sources": {
+                "openmeteo": self.openmeteo.to_dict() if self.openmeteo else None,
+                "openmeteo_error": self.openmeteo_error,
+                "wunderground_days": len(days),
+                "hours_by_source": {s: sum(1 for h in hours if h.source == s) for s in ("openmeteo", "wunderground", "climatology")},
+            },
         }
         self.state.bus.publish("forecast", None)
         return self.state.forecast
@@ -197,6 +244,12 @@ class ForecastTask:
 
     def stop(self) -> None:
         self._stop.set()
+
+
+    def scorecard(self, days: int = 14) -> list[dict]:
+        loc = self._location()
+        return scorecard(self.store, loc[0] if loc else None, loc[1] if loc else None, self.cfg.planner.soc_floor,
+                         self.model.k_clear if self.model else 0.0, days=days)
 
 
 def plan_mqtt_values(forecast: dict[str, Any]) -> dict[str, Any]:

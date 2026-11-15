@@ -13,12 +13,15 @@ Chargeverter.
 * Inverter settings read/write with range checks and confirmation for risky ones (opt-in)
 * Chargeverter output inferred from BMS pack power minus inverter battery power (no wiring to it
   needed; an optional RS485 link can sniff or answer its battery polls)
-* Weather Underground integration for the cabin's own station: current conditions including solar
-  radiation, 5-day forecast with cloud cover
+* Hourly solar irradiance forecast from Open-Meteo (free, no key) plus the cabin's own Weather
+  Underground station for measured conditions
 * PV forecast model that learns the array's clear-sky capacity from history and self-corrects against
-  what the forecast predicted; load profile by hour of day
-* Generator planner: simulates SOC 72 h ahead and recommends when to start the outhouse generator and
-  how long to run it, exposed on the API and MQTT for Home Assistant to act on
+  what the forecast predicted; load profiles learned per occupancy mode (occupied / away)
+* Generator planner built around a 30 → 50 % routine: simulates SOC 72 h ahead, recommends when to
+  start the outhouse generator and how long to run, allows a deeper charge only when no solar surplus
+  is coming; exposed on the API and MQTT for Home Assistant to act on
+* Scorecard: starts, run hours, kWh per hour, share of run at full current, hours at the floor and
+  curtailed solar per day, so the strategy can be judged on data
 * SQLite history with hourly rollups; MQTT output using Solar Assistant's topic names plus
   Home Assistant discovery
 * Simulation mode and a serial probe tool, so you can try everything before touching hardware
@@ -84,17 +87,26 @@ An RS485 link to its BMS RJ45 is optional (`chargeverter.mode`): `sniff` shows i
 
 ### Weather and generator planning
 
-1. Get a PWS owner API key at wunderground.com/member/api-keys and set `weather.api_key` (or the
-   `SOLARDASH_WU_API_KEY` environment variable) and `weather.station_id`. `solardash probe weather`
-   prints what the API returns for your station.
-2. The model starts from `planner.pv_kw_peak` (array size) and after a few days of history learns the
-   array's real clear-sky capacity, how it responds to the station's measured irradiance, and a bias
-   factor from forecast-vs-actual. The load profile comes from the last two weeks by hour of day.
-3. The planner simulates SOC for `planner.horizon_h` hours using the forecast cloud cover and
-   recommends one generator run: as late as possible so solar is used first and the Chargeverter runs
-   at full current from a low SOC (best fuel efficiency on an EU3000is), sized to carry the bank to the
-   next solar surplus, capped at `soc_target`, respecting `quiet_hours`. If one run cannot cover a long
-   cloudy stretch it says when the next will be needed. While the generator runs it advises when to stop.
+1. **Forecast source.** Open-Meteo is on by default and needs only `weather.latitude` /
+   `weather.longitude` (or the Wunderground station's position). It supplies hourly global horizontal
+   irradiance, which the PV model uses directly. Optionally add the Wunderground station: a PWS owner
+   API key from wunderground.com/member/api-keys in `weather.api_key` (or `SOLARDASH_WU_API_KEY`) and
+   `weather.station_id`; it adds measured solar radiation, temperature and the narrative forecast.
+   `solardash probe weather` prints what the WU API returns.
+2. **Model.** Starts from `planner.pv_kw_peak` (array size); after a few days of history it learns the
+   array's real clear-sky capacity, the response to the station's measured irradiance, and a bias
+   factor from forecast-vs-actual. Load profiles are learned by hour of day, separately for each
+   occupancy mode; set the cabin's mode in the header dropdown, `PUT /api/occupancy`, or MQTT
+   `<prefix>/occupancy/set` (a Home Assistant presence automation can do it).
+3. **Planner.** Simulates SOC for `planner.horizon_h` hours and recommends one run: as late as possible
+   so solar is used first and the Chargeverter runs at full current from a low SOC (where an EU3000is
+   is most fuel-efficient), sized to carry the bank to the next solar surplus, stopped at `soc_target`
+   (50 % by default, matching the 30 → 50 routine). When the forecast shows no surplus coming within
+   `storm_lookahead_h` it may charge to `soc_target_storm` instead, so one longer run replaces several
+   short ones. Quiet hours and min/max run length are respected; while the generator runs it advises
+   when to stop.
+4. **Scorecard.** `/api/scorecard` and the Forecast tab show per day: starts, run hours, kWh delivered,
+   kWh per hour, share of run time at full current, hours at the floor, and curtailed solar.
 
 The plan is published on MQTT as `solar_assistant/plan/recommended_now`, `plan/stop_recommended`,
 `plan/start_at`, `plan/end_at`, `plan/run_h`, `plan/end_soc`, `plan/reason` and the forecast as
@@ -161,7 +173,9 @@ Chargeverter output while it is selected on the cam switch in the UI.
 | `GET /api/generators` / `PUT /api/generators/active` `{"name": …}` | generator run hours, cam-switch selection |
 | `PUT /api/generators/{name}/signal` `{"running": true, "contactor": false}` | external run/contactor signal (Home Assistant) |
 | `GET /api/weather` | station observation and 5-day forecast |
-| `GET /api/forecast` / `POST /api/forecast/recompute` | PV/load prediction, model, generator plan |
+| `GET /api/forecast` / `POST /api/forecast/recompute` | PV/load prediction, model, sources, generator plan |
+| `GET /api/occupancy` / `PUT /api/occupancy` `{"mode": "occupied"}` | occupancy mode for the load profile |
+| `GET /api/scorecard?days=14` | generator strategy metrics per day |
 | `GET /api/devices`, `GET /api/events`, `GET /api/chargeverter`, `GET /api/inverter/raw` | diagnostics |
 | `WS /ws` | pushes the snapshot about once a second |
 

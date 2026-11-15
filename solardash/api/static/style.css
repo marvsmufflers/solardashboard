@@ -16,7 +16,9 @@ header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; back
 nav { display: flex; gap: 4px; flex-wrap: wrap; }
 nav button, .ranges button, button { background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; font: inherit; }
 nav button.active, .ranges button.active { background: var(--load); color: #fff; border-color: var(--load); }
-.conn { margin-left: auto; font-size: 13px; color: var(--muted); }
+.occ { margin-left: auto; font-size: 13px; color: var(--muted); }
+.occ select { font: inherit; font-size: 13px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.conn { font-size: 13px; color: var(--muted); }
 .conn.ok { color: var(--ok); } .conn.bad { color: var(--bad); }
 main { max-width: 1240px; margin: 0 auto; padding: 16px; }
 .tab { display: none; } .tab.active { display: block; }

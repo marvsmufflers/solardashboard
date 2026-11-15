@@ -78,8 +78,13 @@ class GeneratorConfig:
 
 @dataclass
 class WeatherConfig:
-    enabled: bool = False
+    enabled: bool = False  # Weather Underground station (observations + narrative forecast)
     provider: str = "wunderground"
+    # Open-Meteo hourly irradiance forecast (free, no key). Needs a location:
+    # weather.latitude/longitude or the WU station's reported position.
+    openmeteo_enabled: bool = True
+    openmeteo_interval: float = 3600.0
+    openmeteo_days: int = 7
     api_key: str = ""  # or SOLARDASH_WU_API_KEY
     station_id: str = ""
     latitude: float | None = None  # defaults to the station's reported position
@@ -93,7 +98,9 @@ class WeatherConfig:
 class PlannerConfig:
     enabled: bool = True
     soc_floor: float = 30.0  # never plan to go below this
-    soc_target: float = 90.0  # stop charging here (end of the LFP constant-current region)
+    soc_target: float = 50.0  # normal stop point (the owner's 30 -> 50 % routine)
+    soc_target_storm: float = 80.0  # allowed stop point when the forecast shows no solar surplus coming
+    storm_lookahead_h: float = 36.0  # ... i.e. when the bank would need another run within this many hours
     soc_margin: float = 5.0  # planning margin above the floor
     generator_dc_kw: float = 2.4  # Chargeverter DC output from one EU3000is (~2.8 kW AC)
     charge_efficiency: float = 0.94
@@ -104,6 +111,13 @@ class PlannerConfig:
     pv_kw_peak: float = 6.0  # array size; used until enough history has been learned
     battery_kwh: float | None = None  # default: bank Ah × 51.2 V
     recompute_interval: float = 300.0
+
+
+@dataclass
+class OccupancyConfig:
+    enabled: bool = True
+    modes: list[str] = field(default_factory=lambda: ["occupied", "away"])
+    default: str = "away"
 
 
 @dataclass
@@ -149,6 +163,7 @@ class Config:
     ])
     weather: WeatherConfig = field(default_factory=WeatherConfig)
     planner: PlannerConfig = field(default_factory=PlannerConfig)
+    occupancy: OccupancyConfig = field(default_factory=OccupancyConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     web: WebConfig = field(default_factory=WebConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
@@ -185,6 +200,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         generators=[_build(GeneratorConfig, g) for g in raw["generators"]] if "generators" in raw else Config.__dataclass_fields__["generators"].default_factory(),  # type: ignore[misc]
         weather=_build(WeatherConfig, raw.get("weather")),
         planner=_build(PlannerConfig, raw.get("planner")),
+        occupancy=_build(OccupancyConfig, raw.get("occupancy")),
         history=_build(HistoryConfig, raw.get("history")),
         web=_build(WebConfig, raw.get("web")),
         mqtt=_build(MqttConfig, raw.get("mqtt")),

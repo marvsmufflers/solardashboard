@@ -1,8 +1,10 @@
 """PV production model learned from history + load profile.
 
-Prediction for an hour:
+Prediction for an hour (best available source first):
 
-    pv_kw = k_clear × clearsky_kW/m² × cloud_transmission(cloud) × bias
+    pv_kw = k_clear × GHI_forecast_kW/m² × bias            (Open-Meteo hourly irradiance)
+    pv_kw = k_clear × clearsky_kW/m² × cloud_transmission(cloud) × bias   (WU daypart cloud cover)
+    pv_kw = k_clear × clearsky_kW/m² × cloud_transmission(0.5) × bias     (nothing else)
 
 * ``k_clear`` – how many kW the array makes per kW/m² of clear-sky GHI. Learned
   as the 90th percentile of pv/clear-sky over recent daylight hours (that is,
@@ -42,9 +44,16 @@ class PvModel:
     samples_meas: int
     samples_bias: int
     fitted_at: float
-    load_profile_kw: list[float] = field(default_factory=lambda: [0.5] * 24)  # by local hour
+    load_profile_kw: list[float] = field(default_factory=lambda: [0.5] * 24)  # by local hour (all data)
     load_profile_source: str = "default"
     load_days: int = 0
+    load_profiles: dict[str, list[float]] = field(default_factory=dict)  # per occupancy mode
+    load_profile_days: dict[str, int] = field(default_factory=dict)
+
+    def profile_for(self, mode: str | None) -> list[float]:
+        if mode and mode in self.load_profiles:
+            return self.load_profiles[mode]
+        return self.load_profile_kw
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -60,7 +69,7 @@ def _percentile(values: list[float], pct: float) -> float:
 
 
 def fit_model(store: HistoryStore, lat: float, lon: float, pv_kw_peak: float, now: float | None = None,
-              days: int = 30, previous: PvModel | None = None) -> PvModel:
+              days: int = 30, previous: PvModel | None = None, modes: list[str] | None = None) -> PvModel:
     now = now or time.time()
     start = now - days * 86400
     pv = dict(store.query("total/pv_power", start, now, step=3600))
@@ -106,27 +115,44 @@ def fit_model(store: HistoryStore, lat: float, lon: float, pv_kw_peak: float, no
         nb += 1
     bias = max(0.4, min(1.6, num / den)) if nb >= 12 and den > 0 else 1.0
 
-    # load profile by local hour, median across days
-    load = store.query("total/load_power", now - 14 * 86400, now, step=3600)
+    # load profile by local hour, median across days (overall and per occupancy mode)
+    load_days_back = 60 if modes else 14
+    load = store.query("total/load_power", now - load_days_back * 86400, now, step=3600)
     if not load:
-        load = store.query("inverter/load_power", now - 14 * 86400, now, step=3600)
-    by_hour: dict[int, list[float]] = {h: [] for h in range(24)}
-    days_seen = set()
-    for ts, w in load:
-        lt = time.localtime(ts)
-        by_hour[lt.tm_hour].append(w / 1000.0)
-        days_seen.add((lt.tm_year, lt.tm_yday))
-    if sum(len(v) for v in by_hour.values()) >= 24:
+        load = store.query("inverter/load_power", now - load_days_back * 86400, now, step=3600)
+    occ = dict(store.query("total/occupancy", now - load_days_back * 86400, now, step=3600)) if modes else {}
+
+    def build(points: list[tuple[int, float]]) -> tuple[list[float] | None, int]:
+        by_hour: dict[int, list[float]] = {h: [] for h in range(24)}
+        seen = set()
+        for ts, w in points:
+            lt = time.localtime(ts)
+            by_hour[lt.tm_hour].append(w / 1000.0)
+            seen.add((lt.tm_year, lt.tm_yday))
+        if sum(len(v) for v in by_hour.values()) < 24:
+            return None, len(seen)
         overall = statistics.median([w for v in by_hour.values() for w in v])
-        profile = [statistics.median(v) if v else overall for h, v in sorted(by_hour.items())]
+        return [round(statistics.median(v) if v else overall, 3) for h, v in sorted(by_hour.items())], len(seen)
+
+    recent = [(ts, w) for ts, w in load if ts >= now - 14 * 86400]
+    profile, ndays = build(recent)
+    if profile is not None:
         l_source = "learned"
     else:
         profile = (previous.load_profile_kw if previous else [0.5] * 24)
         l_source = previous.load_profile_source if previous else "default"
+    profiles: dict[str, list[float]] = dict(previous.load_profiles) if previous else {}
+    profile_days: dict[str, int] = dict(previous.load_profile_days) if previous else {}
+    for idx, mode in enumerate(modes or []):
+        pts = [(ts, w) for ts, w in load if round(occ.get(ts, -1)) == idx]
+        prof, nd = build(pts)
+        if prof is not None:
+            profiles[mode] = prof
+            profile_days[mode] = nd
     return PvModel(k_clear=round(k_clear, 3), k_clear_source=k_source, k_meas=None if k_meas is None else round(k_meas, 5),
                    bias=round(bias, 3), samples_clear=len(ratios), samples_meas=len(meas), samples_bias=nb,
                    fitted_at=now, load_profile_kw=[round(x, 3) for x in profile], load_profile_source=l_source,
-                   load_days=len(days_seen))
+                   load_days=ndays, load_profiles=profiles, load_profile_days=profile_days)
 
 
 def save_model(store: HistoryStore, model: PvModel) -> None:
@@ -150,23 +176,49 @@ class HourForecast:
     cloud: float
     pv_kw: float
     load_kw: float
+    source: str = "climatology"  # openmeteo | wunderground | climatology
+    ghi_wm2: float | None = None
+    snowfall_cm: float | None = None
+    temperature_c: float | None = None
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
 
 
 def predict_hours(model: PvModel, lat: float, lon: float, forecast_days: list, start: float, hours: int,
-                  default_cloud: float = 0.5) -> list[HourForecast]:
-    """Hourly PV/load prediction from ``start`` for ``hours`` hours."""
+                  default_cloud: float = 0.5, openmeteo: dict | None = None, mode: str | None = None) -> list[HourForecast]:
+    """Hourly PV/load prediction from ``start`` for ``hours`` hours.
+
+    ``openmeteo`` maps hour-start epoch -> HourlyPoint (with ``ghi``); it wins
+    when present, Wunderground daypart cloud cover is the fallback, then a
+    climatological 50 % cloud.
+    """
     by_date = {d.date: d for d in forecast_days}
+    profile = model.profile_for(mode)
     out = []
     for ts, cs in clear_sky_hourly(lat, lon, datetime.fromtimestamp(start, timezone.utc), hours):
         lt = time.localtime(ts)
+        om = openmeteo.get(ts) if openmeteo else None
         day = by_date.get(time.strftime("%Y-%m-%d", lt))
-        cloud = day.cloud_for_hour(lt.tm_hour) if day is not None else default_cloud
-        pv_kw = model.k_clear * (cs / 1000.0) * cloud_transmission(cloud) * model.bias
-        out.append(HourForecast(ts=ts, clear_sky_wm2=round(cs, 1), cloud=round(cloud, 2), pv_kw=round(max(0.0, pv_kw), 3),
-                                load_kw=model.load_profile_kw[lt.tm_hour]))
+        snow = temp = ghi = None
+        if om is not None and om.ghi is not None:
+            # cap at 1.1× clear sky to guard against model/clear-sky mismatch at low sun
+            ghi = min(float(om.ghi), 1.1 * cs) if cs > 0 else 0.0
+            cloud = om.cloud if om.cloud is not None else (1.0 - ghi / cs if cs > 50 else default_cloud)
+            pv_kw = model.k_clear * (ghi / 1000.0) * model.bias
+            source = "openmeteo"
+            snow, temp = om.snowfall_cm, om.temperature_c
+        elif day is not None:
+            cloud = day.cloud_for_hour(lt.tm_hour)
+            pv_kw = model.k_clear * (cs / 1000.0) * cloud_transmission(cloud) * model.bias
+            source = "wunderground"
+        else:
+            cloud = default_cloud
+            pv_kw = model.k_clear * (cs / 1000.0) * cloud_transmission(cloud) * model.bias
+            source = "climatology"
+        out.append(HourForecast(ts=ts, clear_sky_wm2=round(cs, 1), cloud=round(max(0.0, min(1.0, cloud)), 2),
+                                pv_kw=round(max(0.0, pv_kw), 3), load_kw=profile[lt.tm_hour], source=source,
+                                ghi_wm2=None if ghi is None else round(ghi, 1), snowfall_cm=snow, temperature_c=temp))
     return out
 
 
@@ -174,16 +226,24 @@ def daily_summary(hours: list[HourForecast]) -> list[dict]:
     days: dict[str, dict[str, Any]] = {}
     for h in hours:
         d = time.strftime("%Y-%m-%d", time.localtime(h.ts))
-        e = days.setdefault(d, {"date": d, "pv_kwh": 0.0, "load_kwh": 0.0, "cloud_sum": 0.0, "n": 0, "hours": 0})
+        e = days.setdefault(d, {"date": d, "pv_kwh": 0.0, "load_kwh": 0.0, "cloud_sum": 0.0, "n": 0, "snow": 0.0,
+                                "tmin": None, "sources": set()})
         e["pv_kwh"] += h.pv_kw
         e["load_kwh"] += h.load_kw
         e["cloud_sum"] += h.cloud
         e["n"] += 1
+        e["sources"].add(h.source)
+        if h.snowfall_cm:
+            e["snow"] += h.snowfall_cm
+        if h.temperature_c is not None:
+            e["tmin"] = h.temperature_c if e["tmin"] is None else min(e["tmin"], h.temperature_c)
     out = []
     for e in days.values():
         out.append({"date": e["date"], "pv_kwh": round(e["pv_kwh"], 1), "load_kwh": round(e["load_kwh"], 1),
                     "net_kwh": round(e["pv_kwh"] - e["load_kwh"], 1), "cloud_avg": round(e["cloud_sum"] / max(1, e["n"]), 2),
-                    "hours_covered": e["n"]})
+                    "hours_covered": e["n"], "snow_cm": round(e["snow"], 1), "temp_min_c": e["tmin"],
+                    "source": "openmeteo" if "openmeteo" in e["sources"] else ("wunderground" if "wunderground" in e["sources"] else "climatology"),
+                    "snow_risk": bool(e["snow"] >= 2.0)})
     return out
 
 

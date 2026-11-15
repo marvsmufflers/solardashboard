@@ -39,6 +39,7 @@ DAILY_ENERGY_KEYS = [
     "rectifier_energy_today", "ac_input_energy_today", "ac_input_total_energy_today", "eps_energy_today",
 ]
 ACTIVE_GENERATOR_KEY = "active_generator"
+OCCUPANCY_KEY = "occupancy_mode"
 GEN_ON_DELAY_S = 20.0   # inferred output must persist this long to count as "running"
 GEN_OFF_DELAY_S = 45.0  # and be gone this long to count as "stopped"
 
@@ -102,7 +103,13 @@ class Service:
 
                 fetch = SimulatedWeatherFetch(world)
             self.weather = WeatherTask(cfg, self.state, self.store, fetch=fetch)
-        self.forecast = ForecastTask(cfg, self.state, self.store, self.weather)
+        om_fetch = None
+        if world is not None:
+            from ..devices.simulated import SimulatedOpenMeteoFetch
+
+            om_fetch = SimulatedOpenMeteoFetch(world)
+        self.forecast = ForecastTask(cfg, self.state, self.store, self.weather, openmeteo_fetch=om_fetch,
+                                     occupancy_mode=self.occupancy_mode)
         if cfg.mqtt.enabled:
             topics: dict[str, tuple[str, str]] = {}
             for g in cfg.generators:
@@ -112,7 +119,8 @@ class Service:
                     topics[g.contactor_topic] = (g.name, "contactor")
             self.mqtt = MqttPublisher(cfg.mqtt, self.state, write_setting=self.write_setting_blocking,
                                       signal_topics=topics, on_signal=self.set_generator_signal,
-                                      extra_values=lambda: plan_mqtt_values(self.state.forecast))
+                                      extra_values=lambda: plan_mqtt_values(self.state.forecast),
+                                      on_occupancy=self.set_occupancy)
 
     # -- lifecycle -----------------------------------------------------------------
     async def start(self) -> None:
@@ -161,6 +169,7 @@ class Service:
                     threshold_w=self.cfg.chargeverter.power_threshold_w,
                 )
                 self._track_generators()
+                self.state.derived["occupancy"] = self.occupancy_mode()
                 self.state.bus.publish("total", None)
                 # device up/down events
                 for k, h in self.state.devices.items():
@@ -185,6 +194,10 @@ class Service:
             v = self.state.derived.get(k)
             if v is not None:
                 m[f"total/{k}"] = v
+        if self.cfg.occupancy.enabled:
+            mode = self.occupancy_mode()
+            if mode in self.cfg.occupancy.modes:
+                m["total/occupancy"] = self.cfg.occupancy.modes.index(mode)
         for idx, b in self.state.batteries.items():
             if now - b.get("_updated", 0) < 60:
                 for k in BATTERY_HISTORY_KEYS:
@@ -213,6 +226,23 @@ class Service:
             except Exception as e:  # noqa: BLE001
                 log.exception("sample loop: %s", e)
             await asyncio.sleep(interval)
+
+    # -- occupancy ---------------------------------------------------------------------
+    def occupancy_mode(self) -> str | None:
+        if not self.cfg.occupancy.enabled:
+            return None
+        stored = self.store.get_kv(OCCUPANCY_KEY)
+        return stored if stored in self.cfg.occupancy.modes else self.cfg.occupancy.default
+
+    def set_occupancy(self, mode: str) -> str:
+        if mode not in self.cfg.occupancy.modes:
+            raise KeyError(f"unknown occupancy mode {mode!r}; configured: {self.cfg.occupancy.modes}")
+        if self.occupancy_mode() != mode:
+            self.store.set_kv(OCCUPANCY_KEY, mode)
+            self.store.add_event("info", "occupancy", f"mode set to {mode}")
+            self.state.derived["occupancy"] = mode
+            self.state.bus.publish("total", None)
+        return mode
 
     # -- generator run hours -------------------------------------------------------
     @property

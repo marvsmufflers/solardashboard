@@ -123,8 +123,10 @@ class MqttPublisher:
         signal_topics: dict[str, tuple[str, str]] | None = None,
         on_signal: Callable[[str, bool | None, bool | None], Any] | None = None,
         extra_values: Callable[[], dict[str, Any]] | None = None,
+        on_occupancy: Callable[[str], Any] | None = None,
     ) -> None:
         self.extra_values = extra_values
+        self.on_occupancy = on_occupancy
         self.cfg = cfg
         self.state = state
         self.write_setting = write_setting
@@ -157,6 +159,7 @@ class MqttPublisher:
         log.info("mqtt: connected to %s:%d", self.cfg.host, self.cfg.port)
         client.publish(f"{self.cfg.prefix}/solardash/status", "online", retain=True)
         client.subscribe(f"{self.cfg.prefix}/inverter_1/+/set")
+        client.subscribe(f"{self.cfg.prefix}/occupancy/set")
         for topic in self.signal_topics:
             client.subscribe(topic)
             log.info("mqtt: listening for generator signal on %s", topic)
@@ -180,6 +183,12 @@ class MqttPublisher:
                 log.warning("mqtt: signal handling failed: %s", e)
             return
         parts = msg.topic.split("/")
+        if msg.topic == f"{self.cfg.prefix}/occupancy/set" and self.on_occupancy is not None:
+            try:
+                self.on_occupancy(msg.payload.decode(errors="replace").strip().strip('"').lower())
+            except Exception as e:  # noqa: BLE001
+                log.warning("mqtt: occupancy set failed: %s", e)
+            return
         if len(parts) != 4 or parts[-1] != "set":
             return
         key = parts[2]

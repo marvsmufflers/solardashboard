@@ -29,7 +29,9 @@ STEP_S = 900  # 15-minute simulation step
 @dataclass
 class PlannerParams:
     soc_floor: float = 30.0
-    soc_target: float = 90.0
+    soc_target: float = 50.0
+    soc_target_storm: float = 80.0
+    storm_lookahead_h: float = 36.0
     soc_margin: float = 5.0
     generator_dc_kw: float = 2.4
     charge_efficiency: float = 0.94
@@ -130,6 +132,28 @@ def _run_until_target(soc0: float, start: float, hours: dict[int, HourForecast],
     return traj, gen_end
 
 
+def _end_target(p: PlannerParams, floor: float, needed_soc: float, drawdown_window_ok: bool) -> float:
+    """Normal runs stop at ``soc_target``. If the deficit after the run cannot be
+    covered by solar within ``storm_lookahead_h`` (another run would follow
+    soon), allow charging up to ``soc_target_storm`` so one longer run replaces
+    several short ones."""
+    cap = p.soc_target if drawdown_window_ok else max(p.soc_target, p.soc_target_storm)
+    return min(cap, needed_soc)
+
+
+def _needs_more_soon(baseline: list[tuple[int, float]], t_from: float, floor: float, soc_gain_cap: float,
+                     lookahead_h: float) -> bool:
+    """Would the bank cross the floor again within lookahead even after a run to soc_gain_cap?"""
+    soc_ref = next((s for t, s in baseline if t >= t_from), None)
+    if soc_ref is None:
+        return False
+    for t, s in baseline:
+        if t_from < t <= t_from + lookahead_h * 3600:
+            if soc_gain_cap - (soc_ref - s) < floor:
+                return True
+    return False
+
+
 def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: PlannerParams,
                    generator_running: bool = False) -> Plan:
     hours = {h.ts: h for h in forecast}
@@ -143,7 +167,8 @@ def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: 
         # energy needed from now: largest drawdown of the baseline relative to now
         for t, s in baseline:
             drawdown_after = max(drawdown_after, soc_now - s)
-        end_soc = min(p.soc_target, max(floor + drawdown_after, soc_now))
+        storm = _needs_more_soon(baseline, now, floor, p.soc_target, p.storm_lookahead_h)
+        end_soc = max(_end_target(p, floor, floor + drawdown_after, not storm), min(soc_now + 1.0, 100.0))
         stop = soc_now >= end_soc - 0.5
         traj, gen_end = _run_until_target(soc_now, now, hours, p, now, end_soc)
         return Plan(needed=True, recommended_now=not stop, start_at=now, end_at=gen_end,
@@ -170,7 +195,8 @@ def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: 
             soc_at_start = next((s for t, s in baseline if t >= t_start), soc_now)
             # energy needed: drawdown after the start, relative to SOC at start
             draw = max((soc_at_start - s) for t, s in baseline if t >= t_start)
-            end_soc = min(p.soc_target, max(soc_at_start + 1.0, floor + draw))
+            storm = _needs_more_soon(baseline, t_start, floor, p.soc_target, p.storm_lookahead_h)
+            end_soc = max(soc_at_start + 1.0, _end_target(p, floor, floor + draw, not storm))
             # enforce minimum run length by raising end_soc if necessary
             min_gain = p.min_run_h * p.generator_dc_kw * p.charge_efficiency * 0.97 / p.battery_kwh * 100.0
             end_soc = min(100.0, max(end_soc, soc_at_start + min_gain))
@@ -184,7 +210,8 @@ def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: 
         # nothing fully satisfies the constraints: start now
         soc_at_start = soc_now
         draw = max((soc_now - s) for t, s in baseline)
-        end_soc = min(p.soc_target, max(soc_now + 1.0, floor + draw))
+        storm = _needs_more_soon(baseline, now, floor, p.soc_target, p.storm_lookahead_h)
+        end_soc = max(soc_now + 1.0, _end_target(p, floor, floor + draw, not storm))
         traj, gen_end = _run_until_target(soc_now, now, hours, p, now, end_soc)
         best = (now, traj, gen_end, end_soc)
         reason_prefix = "Constraints (quiet hours / floor) cannot all be met; start as soon as possible. "
@@ -197,9 +224,10 @@ def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: 
     recommended_now = lead <= 10 * 60
     when = "now" if recommended_now else time.strftime("%a %H:%M", time.localtime(t_start))
     next_deficit = next((t for t, s in traj if t > gen_end and s < floor), None)
-    tail = ("that covers the deficit until solar takes over"
+    storm_note = f" (charging past the usual {p.soc_target:.0f} % because no solar surplus is coming soon)" if end_soc > p.soc_target + 0.5 else ""
+    tail = (f"that covers the deficit until solar takes over{storm_note}"
             if next_deficit is None else
-            f"another run will be needed around {time.strftime('%a %H:%M', time.localtime(next_deficit))}")
+            f"another run will be needed around {time.strftime('%a %H:%M', time.localtime(next_deficit))}{storm_note}")
     reason = (f"{reason_prefix}Without the generator the bank would drop to {min_soc:.0f} % around "
               f"{time.strftime('%a %H:%M', time.localtime(min_at))}. Start {when} at about {start_soc:.0f} % SOC and run "
               f"{run_h:.1f} h to {end_soc:.0f} %; {tail}, keeping the Chargeverter at full current.")

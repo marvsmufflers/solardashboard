@@ -64,7 +64,14 @@ generators:
     notes: Honda EU3000is, plugged in during winter stays (no sense wire; inferred from Chargeverter output)
 
 weather:
-  enabled: false
+  # Open-Meteo (free, no key) supplies the hourly irradiance forecast the PV
+  # model runs on; it only needs latitude/longitude. The Weather Underground
+  # station adds real measured conditions (solar radiation, temperature) and
+  # the narrative forecast. Enable either or both.
+  openmeteo_enabled: true
+  openmeteo_interval: 3600
+  openmeteo_days: 7
+  enabled: false         # Weather Underground station below
   provider: wunderground
   api_key: ""            # PWS owner key from wunderground.com/member/api-keys (or env SOLARDASH_WU_API_KEY)
   station_id: KXXXXXXX   # your station; its solar radiation sensor (if any) calibrates the PV model
@@ -77,7 +84,9 @@ weather:
 planner:
   enabled: true
   soc_floor: 30          # never plan to go below
-  soc_target: 90         # stop here: above it LFP leaves constant-current and the generator idles
+  soc_target: 50         # normal stop point (30 -> 50 % routine; keeps room for tomorrow's sun)
+  soc_target_storm: 80   # may charge this far when no solar surplus is coming within storm_lookahead_h
+  storm_lookahead_h: 36
   soc_margin: 5
   generator_dc_kw: 2.4   # what the Chargeverter delivers from one EU3000is
   charge_efficiency: 0.94
@@ -88,6 +97,14 @@ planner:
   pv_kw_peak: 6.0        # array size, used until the model has learned from history
   battery_kwh: null      # default: bank Ah x 51.2 V
   recompute_interval: 300
+
+occupancy:
+  # Cabin load is very different occupied vs away. The current mode is set in
+  # the UI, via PUT /api/occupancy or MQTT <prefix>/occupancy/set, and the
+  # load profile is learned per mode.
+  enabled: true
+  modes: [occupied, away]
+  default: away
 
 history:
   path: data/solardash.db

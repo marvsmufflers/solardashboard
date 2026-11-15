@@ -245,6 +245,41 @@ class SimulatedWeatherFetch:
         return {}
 
 
+class SimulatedOpenMeteoFetch:
+    """Open-Meteo stand-in: hourly GHI = clear sky × a day-dependent cloud factor."""
+
+    LAT, LON = 39.0, -105.5
+
+    def __init__(self, world: SimWorld) -> None:
+        self.world = world
+
+    def __call__(self, url: str) -> dict:
+        from datetime import datetime, timedelta, timezone
+
+        from ..weather.solar import clear_sky_hourly
+
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(days=2)
+        n = 9 * 24
+        clear = clear_sky_hourly(self.LAT, self.LON, start, n)
+        rng = random.Random(int(time.time() // 86400))
+        day_factor = {}
+        times, ghi, direct, diffuse, cloud, temp, snow, precip, code = [], [], [], [], [], [], [], [], []
+        for ts, cs in clear:
+            d = ts // 86400
+            f = day_factor.setdefault(d, rng.choice([0.95, 0.85, 0.6, 0.35, 0.2]))
+            end = datetime.fromtimestamp(ts + 3600, timezone.utc)  # Open-Meteo stamps the hour *end* for means
+            times.append(end.strftime("%Y-%m-%dT%H:%M"))
+            g = round(cs * f, 1)
+            ghi.append(g); direct.append(round(g * 0.7, 1)); diffuse.append(round(g * 0.3, 1))
+            cloud.append(int((1 - f) * 100)); temp.append(round(-3 + 8 * f, 1))
+            snow.append(0.5 if f < 0.3 else 0.0); precip.append(0.3 if f < 0.4 else 0.0); code.append(3 if f < 0.5 else 0)
+        return {"latitude": self.LAT, "longitude": self.LON, "elevation": 2600.0,
+                "hourly": {"time": times, "shortwave_radiation": ghi, "direct_radiation": direct, "diffuse_radiation": diffuse,
+                           "cloud_cover": cloud, "temperature_2m": temp, "snowfall": snow, "precipitation": precip,
+                           "weather_code": code}}
+
+
 class SimulatedInverterLink(LoopbackLink):
     def __init__(self, world: SimWorld, unit: int = 1) -> None:
         super().__init__(self._respond)
