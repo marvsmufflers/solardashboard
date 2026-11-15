@@ -6,7 +6,7 @@ DC output.
 
 Sign conventions used throughout solardash:
 * battery current/power: **positive = charging**, negative = discharging
-* grid power: positive = import
+* the inverter's AC input is the generator (off-grid system)
 """
 
 from __future__ import annotations
@@ -115,16 +115,16 @@ def compute_totals(inverter: dict, batteries: dict[int, dict], chargeverter: dic
         ("eps_power", "ac_output_power"),
         ("eps_voltage", "ac_output_voltage"),
         ("eps_frequency", "ac_output_frequency"),
-        ("grid_power", "grid_power"),
-        ("grid_voltage", "grid_voltage"),
-        ("grid_frequency", "grid_frequency"),
         ("generator_power", "generator_power"),
+        ("generator_running", "generator_running"),
+        ("ac_input_voltage", "generator_voltage"),
+        ("ac_input_frequency", "generator_frequency"),
+        ("ac_input_power", "generator_passthrough_power"),
+        ("rectifier_power", "generator_charge_power"),
         ("pv_energy_today", "pv_energy_today"),
         ("load_energy_today", "load_energy_today"),
         ("battery_charge_energy_today", "battery_energy_in_today"),
         ("battery_discharge_energy_today", "battery_energy_out_today"),
-        ("grid_import_energy_today", "grid_energy_in_today"),
-        ("grid_export_energy_today", "grid_energy_out_today"),
         ("generator_energy_today", "generator_energy_today"),
         ("battery_power", "inverter_battery_power"),
         ("status", "inverter_status"),

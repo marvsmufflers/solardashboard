@@ -38,7 +38,7 @@ def test_chargeverter_inference():
 
 def test_compute_totals_prefers_bms_and_falls_back():
     inv = {"pv_power": 1000, "load_power": 500, "battery_power": -300, "battery_voltage": 52.0, "battery_soc": 40,
-           "eps_power": 520, "grid_power": 0, "generator_power": 0, "status": "Battery off-grid"}
+           "eps_power": 520, "generator_power": 0, "status": "Battery off-grid"}
     t = compute_totals(inv, {}, {})
     assert t["battery_source"] == "inverter" and t["battery_state_of_charge"] == 40 and t["pv_power"] == 1000
     b = {1: _pack(52.1, 80.0, 50, 50, [20.0], [3.3, 3.31])}

@@ -21,6 +21,8 @@ class InverterConfig:
     allow_writes: bool = False
     timeout: float = 1.0
     name: str = "EG4 6000XP"
+    # friendly name for whatever feeds the inverter's AC (GEN) input
+    ac_input_name: str = "Generator (inverter AC input)"
 
 
 @dataclass
@@ -55,6 +57,8 @@ class ChargeverterConfig:
     baud: int = 9600
     parity: str = "N"
     name: str = "EG4 Chargeverter GC"
+    # friendly name for the generator feeding the Chargeverter
+    generator_name: str = "Generator (Chargeverter)"
     # power inference: minimum derived power (W) to report as Chargeverter output
     power_threshold_w: float = 150.0
     emulate: ChargeverterEmulateConfig = field(default_factory=ChargeverterEmulateConfig)

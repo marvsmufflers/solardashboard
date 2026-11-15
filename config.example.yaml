@@ -8,6 +8,7 @@ log_level: INFO
 inverter:
   enabled: true
   name: EG4 6000XP
+  ac_input_name: Porch generator      # what plugs into the inverter's GEN/AC input
   port: /dev/ttyACM0     # RS485 to the inverter's dongle/INV485 port
   baud: 19200
   unit: 1
@@ -31,6 +32,7 @@ batteries:               # one entry per RS485 link (Solar Assistant "USB JBD RS
 
 chargeverter:
   enabled: false
+  generator_name: Outhouse generator (auto-start)   # what feeds the Chargeverter
   mode: sniff            # sniff = listen only | emulate = answer the Chargeverter as the battery | off
   port: /dev/ttyUSB0     # RS485 adapter wired to the Chargeverter BMS RJ45: pin 1 = B, pin 2 = A
   baud: 9600

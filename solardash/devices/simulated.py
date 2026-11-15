@@ -38,7 +38,8 @@ class SimWorld:
         self.soc = [0.62, 0.60, 0.64][:packs] + [0.6] * max(0, packs - 3)
         self.capacity_ah = 100.0
         self.load_w = 600.0
-        self.gen_on = False
+        self.gen_on = False  # Chargeverter generator
+        self.inv_gen_on = False  # generator on the inverter AC input
         self.cv_told_soc: int | None = None
         self.holding: dict[int, int] = self._default_holding()
         self._last = time.time()
@@ -66,7 +67,13 @@ class SimWorld:
         self.load_w = max(150.0, min(5500.0, self.load_w + self.rng.gauss(0, 60)))
         pv = self.pv_w()
         v = self.pack_voltage()
-        inv_batt_w = pv * 0.96 - self.load_w / 0.93  # + charging
+        avg_soc = sum(self.soc) / self.packs
+        if avg_soc < 0.35:
+            self.inv_gen_on = True
+        elif avg_soc > 0.80:
+            self.inv_gen_on = False
+        self._inv_gen_charge_w = 2500.0 if self.inv_gen_on else 0.0
+        inv_batt_w = pv * 0.96 - self.load_w / 0.93 + self._inv_gen_charge_w  # + charging
         cv_w = 4200.0 if self.gen_on else 0.0
         bank_w = inv_batt_w + cv_w
         bank_ah = bank_w / v * dt / 3600.0
@@ -83,7 +90,8 @@ class SimWorld:
             if self.cv_told_soc <= 50:
                 self.gen_on = True
             elif self.cv_told_soc >= 90:
-                self.gen_on = False
+                self.gen_on = False  # Chargeverter generator
+        self.inv_gen_on = False  # generator on the inverter AC input
 
     def pack_voltage(self, i: int | None = None) -> float:
         soc = sum(self.soc) / self.packs if i is None else self.soc[i]
@@ -104,6 +112,10 @@ class SimWorld:
         for k in range(5):
             h[2 + k] = struct.unpack("<H", sn[2 * k : 2 * k + 2])[0]
         h[15] = 1
+        t = time.localtime()
+        h[12] = (t.tm_mon << 8) | (t.tm_year % 100)
+        h[13] = (t.tm_hour << 8) | t.tm_mday
+        h[14] = (t.tm_sec << 8) | t.tm_min
         h[19] = 740
         h[21] = (1 << 9) | (1 << 0) | (1 << 8) | (1 << 4) | (1 << 5)  # on, eps, seamless, anti-island, neutral
         h[64], h[65], h[66], h[67] = 100, 100, 50, 50
@@ -137,7 +149,12 @@ class SimWorld:
         r[8] = int(round(pv * 0.45))
         r[10] = int(max(0.0, inv_w))
         r[11] = int(max(0.0, -inv_w))
-        r[15] = 0
+        if self.inv_gen_on:
+            r[12], r[15] = 2398, 5998
+            r[17] = int(self._inv_gen_charge_w)
+            r[27] = int(self.load_w)
+            r[32] = int(self.hour_of_day() * 0.4 * 10)
+            r[37] = int(self.hour_of_day() * 0.6 * 10)
         r[16] = int(self.load_w / 0.93)
         r[20] = 2401
         r[23] = 6001
@@ -156,7 +173,7 @@ class SimWorld:
         r[64], r[65], r[66], r[67] = 22, 21, 23, 19
         rt = int(time.time() - self.t0) + 86400 * 40
         r[69], r[70] = rt & 0xFFFF, rt >> 16
-        r[77] = 0
+        r[77] = 1  # AC input configured as generator
         r[80] = 1
         r[81], r[82] = 3000, 3000
         r[83], r[84] = 564, 464

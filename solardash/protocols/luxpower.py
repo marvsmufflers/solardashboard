@@ -55,10 +55,10 @@ INPUT_REGISTERS: list[InputReg] = [
     I(9, "pv3_power", "PV3 power", unit="W", group="diagnostic"),
     I(10, "battery_charge_power", "Battery charge power", unit="W"),
     I(11, "battery_discharge_power", "Battery discharge power", unit="W"),
-    I(12, "grid_voltage", "Grid voltage", scale=0.1, unit="V"),
-    I(13, "grid_voltage_s", "Grid voltage S", scale=0.1, unit="V", group="diagnostic"),
-    I(14, "grid_voltage_t", "Grid voltage T", scale=0.1, unit="V", group="diagnostic"),
-    I(15, "grid_frequency", "Grid frequency", scale=0.01, unit="Hz"),
+    I(12, "ac_input_voltage", "AC input (generator) voltage", scale=0.1, unit="V"),
+    I(13, "ac_input_voltage_s", "AC input voltage S", scale=0.1, unit="V", group="diagnostic"),
+    I(14, "ac_input_voltage_t", "AC input voltage T", scale=0.1, unit="V", group="diagnostic"),
+    I(15, "ac_input_frequency", "AC input (generator) frequency", scale=0.01, unit="Hz"),
     I(16, "inverter_power", "Inverter power", unit="W"),
     I(17, "rectifier_power", "Rectifier (AC charge) power", unit="W"),
     I(18, "inverter_current", "Inverter RMS current", scale=0.01, unit="A", group="diagnostic"),
@@ -69,8 +69,8 @@ INPUT_REGISTERS: list[InputReg] = [
     I(23, "eps_frequency", "AC output (EPS) frequency", scale=0.01, unit="Hz"),
     I(24, "eps_power", "AC output (EPS) power", unit="W"),
     I(25, "eps_apparent_power", "AC output apparent power", unit="VA", group="diagnostic"),
-    I(26, "grid_export_power", "Power to grid", unit="W"),
-    I(27, "grid_import_power", "Power from grid", unit="W"),
+    I(26, "ac_backfeed_power", "Power back out of the AC input", unit="W", group="diagnostic"),
+    I(27, "ac_input_power", "AC input (generator) pass-through power", unit="W"),
     I(28, "pv1_energy_today", "PV1 energy today", scale=0.1, unit="kWh", group="energy"),
     I(29, "pv2_energy_today", "PV2 energy today", scale=0.1, unit="kWh", group="energy"),
     I(30, "pv3_energy_today", "PV3 energy today", scale=0.1, unit="kWh", group="energy"),
@@ -79,8 +79,8 @@ INPUT_REGISTERS: list[InputReg] = [
     I(33, "battery_charge_energy_today", "Battery charged today", scale=0.1, unit="kWh", group="energy"),
     I(34, "battery_discharge_energy_today", "Battery discharged today", scale=0.1, unit="kWh", group="energy"),
     I(35, "eps_energy_today", "AC output energy today", scale=0.1, unit="kWh", group="energy"),
-    I(36, "grid_export_energy_today", "Exported today", scale=0.1, unit="kWh", group="energy"),
-    I(37, "grid_import_energy_today", "Imported today", scale=0.1, unit="kWh", group="energy"),
+    I(36, "ac_backfeed_energy_today", "AC input backfeed today", scale=0.1, unit="kWh", group="diagnostic"),
+    I(37, "ac_input_energy_today", "AC input pass-through today", scale=0.1, unit="kWh", group="energy"),
     I(38, "bus_voltage_1", "Bus voltage 1", scale=0.1, unit="V", group="diagnostic"),
     I(39, "bus_voltage_2", "Bus voltage 2", scale=0.1, unit="V", group="diagnostic"),
     I(40, "pv1_energy_total", "PV1 energy lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
@@ -91,8 +91,8 @@ INPUT_REGISTERS: list[InputReg] = [
     I(50, "battery_charge_energy_total", "Battery charged lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
     I(52, "battery_discharge_energy_total", "Battery discharged lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
     I(54, "eps_energy_total", "AC output energy lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
-    I(56, "grid_export_energy_total", "Exported lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
-    I(58, "grid_import_energy_total", "Imported lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
+    I(56, "ac_backfeed_energy_total", "AC input backfeed lifetime", "u32", scale=0.1, unit="kWh", group="diagnostic"),
+    I(58, "ac_input_energy_total", "AC input pass-through lifetime", "u32", scale=0.1, unit="kWh", group="energy"),
     I(60, "fault_code", "Fault code", "u32", group="diagnostic"),
     I(62, "warning_code", "Warning code", "u32", group="diagnostic"),
     I(64, "temperature_inner", "Internal temperature", "s16", unit="°C"),
@@ -127,8 +127,8 @@ INPUT_REGISTERS: list[InputReg] = [
     # On the off-grid XP family reg 123 has been shown (12000XP firmware) to be
     # a free-running counter rather than power. Exposed as raw; gated below.
     I(123, "generator_power_raw", "Generator power (raw, unreliable on XP)", unit="W", group="generator"),
-    I(124, "generator_energy_today", "Generator energy today", scale=0.1, unit="kWh", group="generator"),
-    I(125, "generator_energy_total", "Generator energy lifetime", "u32", scale=0.1, unit="kWh", group="generator"),
+    I(124, "generator_energy_today_raw", "Generator energy today (raw, unreliable on XP)", scale=0.1, unit="kWh", group="diagnostic"),
+    I(125, "generator_energy_total_raw", "Generator energy lifetime (raw, unreliable on XP)", "u32", scale=0.1, unit="kWh", group="diagnostic"),
     I(127, "eps_l1_voltage", "AC output L1-N voltage", scale=0.1, unit="V"),
     I(128, "eps_l2_voltage", "AC output L2-N voltage", scale=0.1, unit="V"),
     I(129, "eps_l1_power", "AC output L1 power", unit="W"),
@@ -152,12 +152,12 @@ INPUT_BLOCKS: list[tuple[int, int]] = [(0, 40), (40, 40), (80, 40), (120, 40), (
 STATUS_CODES = {
     0x00: "Standby",
     0x02: "Firmware updating",
-    0x04: "PV on-grid",
+    0x04: "PV with AC input",
     0x08: "PV charge",
-    0x0C: "PV charge on-grid",
-    0x10: "Battery on-grid",
+    0x0C: "PV charge with AC input",
+    0x10: "Battery with AC input",
     0x11: "Bypass",
-    0x14: "PV & battery on-grid",
+    0x14: "PV & battery with AC input",
     0x19: "PV charge + bypass",
     0x20: "AC charge",
     0x28: "PV & AC charge",
@@ -206,15 +206,15 @@ WARNING_CODES = {
     7: "LCD communication failure",
     8: "Software version mismatch",
     9: "Fan is stuck",
-    10: "Grid overload",
+    10: "AC input overload",
     11: "Parallel secondaries exceed limit",
     12: "Battery reverse MOS abnormal",
     13: "Radiator temperature out of range",
     14: "Multiple primary units in parallel",
     15: "Battery reverse",
-    16: "No grid connection",
-    17: "Grid voltage out of range",
-    18: "Grid frequency out of range",
+    16: "No AC input",
+    17: "AC input voltage out of range",
+    18: "AC input frequency out of range",
     20: "Insulation resistance low",
     21: "Leakage current too high",
     22: "DCI exceeded standard",
@@ -278,8 +278,6 @@ def decode_inputs(regs: dict[int, int]) -> dict:
         out["pv_power"] = out.get("pv1_power", 0) + out.get("pv2_power", 0) + out.get("pv3_power", 0)
     if "battery_charge_power" in out and "battery_discharge_power" in out:
         out["battery_power"] = out["battery_charge_power"] - out["battery_discharge_power"]  # +charging
-    if "grid_import_power" in out and "grid_export_power" in out:
-        out["grid_power"] = out["grid_import_power"] - out["grid_export_power"]  # +import
     if "pv1_energy_today" in out:
         out["pv_energy_today"] = round(
             out.get("pv1_energy_today", 0) + out.get("pv2_energy_today", 0) + out.get("pv3_energy_today", 0), 1
@@ -294,13 +292,17 @@ def decode_inputs(regs: dict[int, int]) -> dict:
         out["faults"] = decode_bitfield(out["fault_code"], FAULT_CODES)
     if "warning_code" in out:
         out["warnings"] = decode_bitfield(out["warning_code"], WARNING_CODES)
-    # Generator power on the XP family is not trustworthy from reg 123. If the
-    # AC input is configured as generator, the AC-charge (rectifier) power and
-    # grid import are what the inverter actually pulls from it.
-    if out.get("ac_input_is_generator"):
-        out["generator_power"] = out.get("rectifier_power", 0) + out.get("grid_import_power", 0)
-    else:
-        out["generator_power"] = 0
+    # Off-grid system: the AC input *is* the generator. Reg 123/124/125 are not
+    # trustworthy on the XP family, so generator power/energy is what the
+    # inverter actually takes from the AC input: battery charging through the
+    # rectifier plus load pass-through.
+    if "rectifier_power" in out or "ac_input_power" in out:
+        out["generator_power"] = out.get("rectifier_power", 0) + out.get("ac_input_power", 0)
+    if "rectifier_energy_today" in out or "ac_input_energy_today" in out:
+        out["generator_energy_today"] = round(out.get("rectifier_energy_today", 0) + out.get("ac_input_energy_today", 0), 1)
+    if "rectifier_energy_total" in out or "ac_input_energy_total" in out:
+        out["generator_energy_total"] = round(out.get("rectifier_energy_total", 0) + out.get("ac_input_energy_total", 0), 1)
+    out["generator_running"] = out.get("ac_input_voltage", 0) > 80
     return out
 
 
@@ -346,8 +348,6 @@ SETTINGS: list[Setting] = [
     S("buzzer_enabled", "Buzzer", "System", "bit", FUNC_EN_1, bit=7),
     S("eco_mode", "Eco mode", "System", "bit", FUNC_EN_1, bit=15),
     S("green_mode", "Green mode", "System", "bit", FUNC_EN_1, bit=14),
-    S("ongrid_working_mode", "On-grid working mode", "System", "bit", FUNC_EN_1, bit=11,
-      labels=("Self consumption", "Charge first")),
     S("ac_first_window_1", "AC-first window 1", "System", "time_window", 152, end_reg=153),
     S("ac_first_window_2", "AC-first window 2", "System", "time_window", 154, end_reg=155),
     S("ac_first_window_3", "AC-first window 3", "System", "time_window", 156, end_reg=157),
@@ -359,22 +359,22 @@ SETTINGS: list[Setting] = [
       danger="Set strictly per the battery documentation; ignored for closed-loop lithium."),
     S("float_charge_voltage", "Float charge voltage", "Charging", "number", 144, scale=0.1, minimum=50, maximum=56,
       step=0.1, unit="V"),
-    # -- AC (grid) charge
-    S("grid_charge", "AC charge from grid", "AC charge", "bit", FUNC_EN, bit=7),
-    S("grid_charge_according_to", "AC charge control", "AC charge", "bits", 120, shift=1, width=3,
+    # -- AC charge (charging from the generator on the AC input)
+    S("ac_charge", "AC charge from generator input", "AC charge", "bit", FUNC_EN, bit=7),
+    S("ac_charge_according_to", "AC charge control", "AC charge", "bits", 120, shift=1, width=3,
       options=(0, 1, 2, 3, 4, 5), labels=("Disabled", "Time", "Voltage", "SOC", "Voltage + time", "SOC + time")),
-    S("grid_charge_power_percent", "AC charge power", "AC charge", "number", 66, minimum=0, maximum=100, unit="%"),
-    S("grid_charge_soc_limit", "AC charge SOC limit", "AC charge", "number", 67, minimum=0, maximum=100, unit="%"),
-    S("grid_charge_current", "AC charge current", "AC charge", "number", 168, minimum=0, maximum=140, unit="A"),
-    S("grid_charge_start_voltage", "AC charge start voltage", "AC charge", "number", 158, scale=0.1, minimum=38.5,
+    S("ac_charge_power_percent", "AC charge power", "AC charge", "number", 66, minimum=0, maximum=100, unit="%"),
+    S("ac_charge_soc_limit", "AC charge SOC limit", "AC charge", "number", 67, minimum=0, maximum=100, unit="%"),
+    S("ac_charge_current", "AC charge current", "AC charge", "number", 168, minimum=0, maximum=140, unit="A"),
+    S("ac_charge_start_voltage", "AC charge start voltage", "AC charge", "number", 158, scale=0.1, minimum=38.5,
       maximum=52, step=0.1, unit="V"),
-    S("grid_charge_stop_voltage", "AC charge stop voltage", "AC charge", "number", 159, scale=0.1, minimum=48,
+    S("ac_charge_stop_voltage", "AC charge stop voltage", "AC charge", "number", 159, scale=0.1, minimum=48,
       maximum=59, step=0.1, unit="V"),
-    S("grid_charge_start_capacity", "AC charge start SOC", "AC charge", "number", 160, minimum=0, maximum=90, unit="%"),
-    S("grid_charge_stop_capacity", "AC charge stop SOC", "AC charge", "number", 161, minimum=20, maximum=100, unit="%"),
-    S("grid_charge_slot_1", "AC charge window 1", "AC charge", "time_window", 68, end_reg=69),
-    S("grid_charge_slot_2", "AC charge window 2", "AC charge", "time_window", 70, end_reg=71),
-    S("grid_charge_slot_3", "AC charge window 3", "AC charge", "time_window", 72, end_reg=73),
+    S("ac_charge_start_capacity", "AC charge start SOC", "AC charge", "number", 160, minimum=0, maximum=90, unit="%"),
+    S("ac_charge_stop_capacity", "AC charge stop SOC", "AC charge", "number", 161, minimum=20, maximum=100, unit="%"),
+    S("ac_charge_slot_1", "AC charge window 1", "AC charge", "time_window", 68, end_reg=69),
+    S("ac_charge_slot_2", "AC charge window 2", "AC charge", "time_window", 70, end_reg=71),
+    S("ac_charge_slot_3", "AC charge window 3", "AC charge", "time_window", 72, end_reg=73),
     # -- Charge priority (forced charge)
     S("charge_priority", "Charge priority", "Charge priority", "bit", FUNC_EN, bit=11),
     S("charge_priority_power_percent", "Charge priority power", "Charge priority", "number", 74, minimum=0,
@@ -395,11 +395,7 @@ SETTINGS: list[Setting] = [
       unit="%"),
     S("stop_discharge_voltage", "Stop discharge voltage (lead-acid)", "Discharging", "number", 100, scale=0.1,
       minimum=40, maximum=52, step=0.1, unit="V"),
-    S("ongrid_eod_by_soc", "On-grid end of discharge by", "Discharging", "bit", 120, bit=6,
-      labels=("Voltage", "SOC")),
-    S("ongrid_eod_voltage", "On-grid end-of-discharge voltage", "Discharging", "number", 169, scale=0.1, minimum=40,
-      maximum=56, step=0.1, unit="V"),
-    S("eps_discharge_soc_floor", "Off-grid discharge SOC floor", "Discharging", "number", 125, minimum=0, maximum=90,
+    S("eps_discharge_soc_floor", "Discharge SOC floor", "Discharging", "number", 125, minimum=0, maximum=90,
       unit="%"),
     # -- Forced discharge
     S("forced_discharge", "Forced discharge", "Forced discharge", "bit", FUNC_EN, bit=10),
@@ -421,9 +417,9 @@ SETTINGS: list[Setting] = [
       maximum=90, unit="%"),
     S("warning_recovery_capacity", "Battery low recovery SOC", "Battery protection", "number", 165, minimum=20,
       maximum=100, unit="%"),
-    S("shutdown_battery_voltage", "Switch to grid (low battery) voltage", "Battery protection", "number", 166,
+    S("shutdown_battery_voltage", "Switch to AC input (low battery) voltage", "Battery protection", "number", 166,
       scale=0.1, minimum=44.4, maximum=51.4, step=0.1, unit="V"),
-    S("shutdown_battery_capacity", "Switch to grid (low battery) SOC", "Battery protection", "number", 167,
+    S("shutdown_battery_capacity", "Switch to AC input (low battery) SOC", "Battery protection", "number", 167,
       minimum=0, maximum=100, unit="%"),
     # -- Battery (lead-acid / unmatched)
     S("battery_capacity", "Battery capacity (unmatched)", "Battery (lead-acid)", "number", 147, minimum=0,
@@ -436,10 +432,6 @@ SETTINGS: list[Setting] = [
       maximum=365, unit="days"),
     S("equalization_duration_hours", "Equalization duration", "Battery (lead-acid)", "number", 151, minimum=0,
       maximum=24, unit="h"),
-    # -- Export
-    S("export_to_grid", "Export to grid", "Export", "bit", FUNC_EN, bit=15),
-    S("export_power_rate", "Export power limit", "Export", "number", 103, minimum=0, maximum=100, unit="%"),
-    S("fast_zero_export", "Fast zero export", "Export", "bit", FUNC_EN_1, bit=1),
     # -- Generator
     S("gen_port_mode", "GEN port mode", "Generator", "bit", 179, bit=13, labels=("Generator", "Smart load")),
     S("generator_charge_according_to", "Generator charge control", "Generator", "bit", 120, bit=7,
@@ -458,10 +450,10 @@ SETTINGS: list[Setting] = [
     S("max_generator_input_power", "Max generator input power", "Generator", "number", 177, unit="W",
       writable=False),
     # -- Backup output
-    S("eps_enabled", "Off-grid output (EPS)", "Backup output", "bit", FUNC_EN, bit=0,
+    S("eps_enabled", "Inverter output (EPS)", "Backup output", "bit", FUNC_EN, bit=0,
       danger="Toggling backup output cuts power to backup loads."),
-    S("seamless_eps_switching", "Seamless off-grid switching", "Backup output", "bit", FUNC_EN, bit=8),
-    S("micro_grid", "Micro-grid", "Backup output", "bit", FUNC_EN_1, bit=2),
+    S("seamless_eps_switching", "Seamless AC input / inverter switching", "Backup output", "bit", FUNC_EN, bit=8),
+    S("micro_grid", "AC-coupled micro-grid", "Backup output", "bit", FUNC_EN_1, bit=2),
     S("eps_output_voltage", "Backup output voltage", "Backup output", "choice", 90, options=(208, 220, 230, 240, 277),
       unit="V", danger="Every backup load must support the new voltage."),
     S("eps_output_frequency", "Backup output frequency", "Backup output", "choice", 91, options=(50, 60), unit="Hz",

@@ -1,6 +1,21 @@
 # solardash – design notes
 
-A self-hosted replacement for Solar Assistant for one specific system:
+A self-hosted replacement for Solar Assistant for one specific **off-grid cabin**. There is no utility
+connection, so nothing in solardash is modelled as "grid": the 6000XP's AC input is a generator input.
+
+Generators: three Honda EU3000is. One is modified for remote start and lives in the outhouse (the
+auto-start path), one is plugged in on the porch during winter stays when it runs for long stretches.
+solardash tracks the two *paths* a generator can feed independently, with names from the config:
+
+* **inverter AC input** (`inverter.ac_input_name`) – detected from AC-input voltage > 80 V; power is
+  rectifier (battery charging) + pass-through to loads;
+* **Chargeverter** (`chargeverter.generator_name`) – detected from the inferred Chargeverter DC output.
+
+For each path solardash records run hours per day (`daily_energy` table, keys
+`generator_*_runtime_h`), logs start/stop events, and shows today's hours on the Overview tab – handy
+for EU3000is oil-change intervals.
+
+Devices:
 
 | Device | Role | Interface | Protocol | Status in solardash |
 |---|---|---|---|---|
@@ -31,8 +46,14 @@ The existing site (Docker on a Synology DS225+) uses:
   * reg 5 packs SOC (low byte) and SOH (high byte);
   * 32-bit energy counters are low-word first;
   * reg 77 bit 0 says whether the AC input is configured as **generator**;
-  * reg 123 ("generator power") is a free-running counter on the XP firmware – not used; when the AC
-    input is a generator, solardash reports `rectifier_power + grid_import_power` as generator power;
+  * regs 12/15/27 (vendor names "grid voltage/frequency/power to user") are exposed as
+    `ac_input_voltage`, `ac_input_frequency`, `ac_input_power` (generator pass-through to loads);
+  * reg 123 ("generator power") and 124–126 are not real measurements on the XP firmware – not used;
+    `generator_power = rectifier_power + ac_input_power` and generator energy is the sum of the
+    rectifier and pass-through counters;
+  * settings that only mean something with a utility connection (export, on-grid working mode,
+    on-grid end-of-discharge) are not exposed; "AC charge" settings are kept because they govern
+    charging from the generator on the AC input;
   * reg 98 battery current is 0.1 A/LSB (verified by others on a 6000XP; some docs say 0.01).
 * Holding registers (FC03) are decoded into a curated settings table (`SETTINGS`) with documented
   ranges. Writes (FC06) are range checked, use read-modify-write for bit fields (reg 21, 110, 120, 179),

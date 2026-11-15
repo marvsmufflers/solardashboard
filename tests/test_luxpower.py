@@ -11,9 +11,12 @@ def test_decode_inputs_basic():
     regs[5] = 31 | (100 << 8)
     regs[7], regs[8] = 1200, 800
     regs[10], regs[11] = 0, 256
-    regs[12], regs[15] = 0, 0
+    regs[12], regs[15] = 2401, 6000
+    regs[17] = 1500
     regs[20], regs[23], regs[24] = 2401, 6002, 297
-    regs[27] = 0
+    regs[27] = 400
+    regs[32] = 21
+    regs[37] = 9
     regs[28], regs[29] = 45, 30
     regs[40], regs[41] = 0x1234, 0x0001  # u32 low word first
     regs[64] = 22
@@ -37,6 +40,10 @@ def test_decode_inputs_basic():
     assert out["pv1_energy_total"] == pytest.approx((0x10000 + 0x1234) * 0.1)
     assert out["temperature_battery"] == -5
     assert out["ac_input_is_generator"] is True
+    assert out["ac_input_voltage"] == 240.1 and out["generator_running"] is True
+    assert out["generator_power"] == 1900
+    assert out["generator_energy_today"] == 3.0
+    assert "grid_power" not in out
     assert out["bms_max_discharge_current"] == 300.0
     assert out["bms_battery_current"] == -5.0
     assert out["bms_cell_voltage_max"] == 3.261 and out["bms_cell_temp_max"] == 18.3
@@ -67,11 +74,11 @@ def test_decode_settings_and_labels():
     s = lx.decode_settings(regs)
     assert s["serial_number"] == "3473740399"
     assert s["inverter_time"] == "2026-11-15 14:07:30"
-    assert s["inverter_state"] is True and s["grid_charge"] is True and s["eps_enabled"] is False
-    assert s["grid_charge_slot_1"] == "01:30-05:00"
+    assert s["inverter_state"] is True and s["ac_charge"] is True and s["eps_enabled"] is False
+    assert s["ac_charge_slot_1"] == "01:30-05:00"
     assert s["absorption_charge_voltage"] == 57.4
-    assert s["grid_charge_according_to"] == 3
-    assert lx.setting_label(lx.SETTINGS_BY_KEY["grid_charge_according_to"], 3) == "SOC"
+    assert s["ac_charge_according_to"] == 3
+    assert lx.setting_label(lx.SETTINGS_BY_KEY["ac_charge_according_to"], 3) == "SOC"
     assert s["generator_charge_according_to"] is True
     assert lx.setting_label(lx.SETTINGS_BY_KEY["generator_charge_according_to"], True) == "SOC"
     assert s["line_mode"] == 2 and lx.setting_label(lx.SETTINGS_BY_KEY["line_mode"], 2).startswith("GEN")
@@ -90,7 +97,7 @@ def test_encode_number_range_checks():
 
 
 def test_encode_bit_read_modify_write():
-    s = lx.SETTINGS_BY_KEY["grid_charge"]
+    s = lx.SETTINGS_BY_KEY["ac_charge"]
     assert lx.encode_setting_write(s, True, {21: 0x0201}) == [(21, 0x0281)]
     assert lx.encode_setting_write(s, False, {21: 0x0281}) == [(21, 0x0201)]
     with pytest.raises(lx.SettingValueError):
@@ -98,7 +105,7 @@ def test_encode_bit_read_modify_write():
 
 
 def test_encode_bits_and_choice_and_window():
-    b = lx.SETTINGS_BY_KEY["grid_charge_according_to"]
+    b = lx.SETTINGS_BY_KEY["ac_charge_according_to"]
     assert lx.encode_setting_write(b, 3, {120: 0x00F1}) == [(120, (0x00F1 & ~0x0E) | (3 << 1))]
     with pytest.raises(lx.SettingValueError):
         lx.encode_setting_write(b, 9, {120: 0})
@@ -106,7 +113,7 @@ def test_encode_bits_and_choice_and_window():
     assert lx.encode_setting_write(c, 240, {}) == [(90, 240)]
     with pytest.raises(lx.SettingValueError):
         lx.encode_setting_write(c, 250, {})
-    w = lx.SETTINGS_BY_KEY["grid_charge_slot_1"]
+    w = lx.SETTINGS_BY_KEY["ac_charge_slot_1"]
     assert lx.encode_setting_write(w, "01:30-05:00", {68: 0, 69: 0}) == [(68, 1 | (30 << 8)), (69, 5)]
     with pytest.raises(lx.SettingValueError):
         lx.encode_setting_write(w, "25:00-05:00", {68: 0, 69: 0})
@@ -118,6 +125,8 @@ def test_encode_bits_and_choice_and_window():
 def test_setting_keys_unique_and_registers_sane():
     keys = [s.key for s in lx.SETTINGS]
     assert len(keys) == len(set(keys))
+    assert not [k for k in keys if "grid" in k and k != "micro_grid"]
+    assert not [r.key for r in lx.INPUT_REGISTERS if "grid" in r.key]
     for s in lx.SETTINGS:
         assert 0 <= s.reg < 240
         if s.kind == "time_window":

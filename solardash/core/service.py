@@ -23,20 +23,21 @@ log = logging.getLogger(__name__)
 INVERTER_HISTORY_KEYS = [
     "pv_power", "pv1_power", "pv2_power", "pv1_voltage", "pv2_voltage", "battery_power", "battery_voltage",
     "battery_soc", "load_power", "eps_power", "eps_l1_power", "eps_l2_power", "eps_voltage", "eps_frequency",
-    "grid_power", "grid_voltage", "grid_frequency", "generator_power", "rectifier_power", "temperature_inner",
+    "ac_input_voltage", "ac_input_frequency", "ac_input_power", "generator_power", "rectifier_power", "temperature_inner",
     "temperature_radiator_1", "temperature_radiator_2", "temperature_battery", "bms_battery_current",
     "bus_voltage_1", "status_code", "fault_code", "warning_code",
 ]
 TOTAL_HISTORY_KEYS = [
     "battery_power", "battery_voltage", "battery_current", "battery_state_of_charge", "battery_temperature",
     "battery_cell_voltage_min", "battery_cell_voltage_max", "battery_cell_imbalance_max", "chargeverter_power",
-    "chargeverter_power_raw", "pv_power", "load_power", "grid_power", "generator_power",
+    "chargeverter_power_raw", "pv_power", "load_power", "generator_power",
 ]
 BATTERY_HISTORY_KEYS = ["voltage", "current", "power", "soc", "temperature", "cell_min", "cell_max", "cell_imbalance"]
 DAILY_ENERGY_KEYS = [
     "pv_energy_today", "load_energy_today", "battery_charge_energy_today", "battery_discharge_energy_today",
-    "grid_import_energy_today", "grid_export_energy_today", "generator_energy_today", "eps_energy_today",
+    "rectifier_energy_today", "ac_input_energy_today", "generator_energy_today", "eps_energy_today",
 ]
+RUNTIME_KEYS = ("generator_inverter_runtime_h", "generator_chargeverter_runtime_h")
 
 
 class Service:
@@ -50,6 +51,9 @@ class Service:
         self.mqtt: MqttPublisher | None = None
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
+        self._runtime_day: str | None = None
+        self._runtime: dict[str, float] = {k: 0.0 for k in RUNTIME_KEYS}
+        self._running_prev: dict[str, bool] = {}
         self._build()
 
     # -- construction ------------------------------------------------------------
@@ -118,6 +122,9 @@ class Service:
                     self.state.inverter, self.state.batteries, self.state.chargeverter,
                     threshold_w=self.cfg.chargeverter.power_threshold_w,
                 )
+                self.state.derived["generator_inverter_name"] = self.cfg.inverter.ac_input_name
+                self.state.derived["generator_chargeverter_name"] = self.cfg.chargeverter.generator_name
+                self._track_generators()
                 self.state.bus.publish("total", None)
                 # device up/down events
                 for k, h in self.state.devices.items():
@@ -163,10 +170,46 @@ class Service:
                     daily = {k: inv[k] for k in DAILY_ENERGY_KEYS if k in inv}
                     if daily:
                         await asyncio.to_thread(self.store.set_daily_energy, day, daily)
+                if self._runtime_day == datetime.fromtimestamp(ts).strftime("%Y-%m-%d"):
+                    await asyncio.to_thread(self.store.set_daily_energy, self._runtime_day, dict(self._runtime))
                 await asyncio.to_thread(self.store.maybe_rollup)
             except Exception as e:  # noqa: BLE001
                 log.exception("sample loop: %s", e)
             await asyncio.sleep(interval)
+
+    # -- generator run hours -------------------------------------------------------
+    def _track_generators(self) -> None:
+        """Accumulate run hours per generator path and log start/stop events."""
+        now = time.time()
+        day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        if self._runtime_day != day:
+            # new day (or first run): load whatever was already recorded today
+            stored = self.store.daily_energy(2).get(day, {})
+            self._runtime = {k: float(stored.get(k, 0.0)) for k in RUNTIME_KEYS}
+            self._runtime_day = day
+            self._last_track = now
+        dt_h = (now - getattr(self, "_last_track", now)) / 3600.0
+        self._last_track = now
+        d = self.state.derived
+        inv_fresh = self.state.inverter_updated is not None and now - self.state.inverter_updated < 60
+        running = {
+            "generator_inverter_runtime_h": bool(inv_fresh and d.get("generator_running")),
+            "generator_chargeverter_runtime_h": bool((d.get("chargeverter_power") or 0) > 0),
+        }
+        names = {
+            "generator_inverter_runtime_h": self.cfg.inverter.ac_input_name,
+            "generator_chargeverter_runtime_h": self.cfg.chargeverter.generator_name,
+        }
+        for k, on in running.items():
+            if on:
+                self._runtime[k] += dt_h
+            prev = self._running_prev.get(k)
+            if prev is not None and prev != on:
+                self.store.add_event("info", "generator", f"{names[k]} {'started' if on else 'stopped'}")
+            self._running_prev[k] = on
+            d[k.replace("_runtime_h", "_running")] = on
+        d["generator_inverter_runtime_today_h"] = round(self._runtime["generator_inverter_runtime_h"], 2)
+        d["generator_chargeverter_runtime_today_h"] = round(self._runtime["generator_chargeverter_runtime_h"], 2)
 
     # -- actions -----------------------------------------------------------------
     def write_setting_blocking(self, key: str, value: Any) -> dict:

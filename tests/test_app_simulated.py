@@ -65,8 +65,8 @@ async def test_full_stack(cfg):
             r = await c.put("/api/settings/generator_charge_stop_capacity", json={"value": 5})
             assert r.status_code == 400
             # bit setting with read-modify-write
-            r = await c.put("/api/settings/grid_charge", json={"value": True})
-            assert r.status_code == 200 and r.json()["grid_charge"] is True
+            r = await c.put("/api/settings/ac_charge", json={"value": True})
+            assert r.status_code == 200 and r.json()["ac_charge"] is True
             await asyncio.sleep(0.8)
             r = await c.get("/api/history?metrics=total/pv_power,battery_1/soc&range=1h")
             series = r.json()["series"]
