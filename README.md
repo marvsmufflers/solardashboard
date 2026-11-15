@@ -76,6 +76,52 @@ Everything is in `config.yaml` (see `config.example.yaml`). Environment override
   It stops answering when battery data is older than `emulate.stale_after` seconds, so a failure
   degrades to the charger's normal *LOST* behaviour. Use a dedicated RS485 adapter for this bus.
 
+## Home Assistant and the auto-start generator
+
+The outhouse generator's 12 V run signal (Waveshare Modbus relay in Home Assistant) is the best
+"running" source there is, so solardash takes it from HA and uses it for that generator's run hours
+and for a "warming up" state until the contactor closes. Either publish it over MQTT (retained) with
+an automation like this:
+
+```yaml
+automation:
+  - alias: solardash generator signal
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.outhouse_generator_running
+      - platform: state
+        entity_id: switch.chargeverter_contactor
+      - platform: homeassistant
+        event: start
+    action:
+      - service: mqtt.publish
+        data:
+          topic: solardash/generator/outhouse/running
+          payload: "{{ 'on' if is_state('binary_sensor.outhouse_generator_running', 'on') else 'off' }}"
+          retain: true
+      - service: mqtt.publish
+        data:
+          topic: solardash/generator/outhouse/contactor
+          payload: "{{ 'on' if is_state('switch.chargeverter_contactor', 'on') else 'off' }}"
+          retain: true
+```
+
+or call the REST endpoint from a `rest_command`:
+
+```yaml
+rest_command:
+  solardash_gen_signal:
+    url: "http://nas-ip:8080/api/generators/Outhouse%20generator%20(auto-start)/signal"
+    method: put
+    content_type: application/json
+    payload: '{"running": {{ running | lower }}, "contactor": {{ contactor | lower }}}'
+```
+
+In the other direction, solardash publishes bank SOC, per-pack data and the inferred Chargeverter
+output with HA discovery, so the "start the generator at X %" automation can run on BMS SOC instead
+of the inverter's estimate. The porch generator has no sense wire; its run hours are inferred from
+Chargeverter output while it is selected on the cam switch in the UI.
+
 ## API
 
 | Endpoint | Purpose |
@@ -86,6 +132,8 @@ Everything is in `config.yaml` (see `config.example.yaml`). Environment override
 | `GET /api/energy/daily` | per-day energy counters |
 | `GET /api/settings` / `PUT /api/settings/{key}` `{"value": …, "confirm": true}` | inverter settings |
 | `POST /api/settings/refresh` | re-read holding registers |
+| `GET /api/generators` / `PUT /api/generators/active` `{"name": …}` | generator run hours, cam-switch selection |
+| `PUT /api/generators/{name}/signal` `{"running": true, "contactor": false}` | external run/contactor signal (Home Assistant) |
 | `GET /api/devices`, `GET /api/events`, `GET /api/chargeverter`, `GET /api/inverter/raw` | diagnostics |
 | `WS /ws` | pushes the snapshot about once a second |
 

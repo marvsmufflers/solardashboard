@@ -83,6 +83,26 @@ async def test_full_stack(cfg):
             assert (await c.get("/api/state")).json()["total"]["generator_active"] == "Porch generator"
             r = await c.put("/api/generators/active", json={"name": "Nope"})
             assert r.status_code == 404
+            # Home Assistant reports the auto-start generator running, contactor still open (warm-up)
+            name = "Outhouse generator (auto-start)"
+            r = await c.put(f"/api/generators/{name}/signal", json={"running": True, "contactor": False})
+            assert r.status_code == 200 and r.json()["running"] is True
+            tot = (await c.get("/api/state")).json()["total"]
+            g = next(x for x in tot["generators"] if x["name"] == name)
+            assert g["running"] is True and g["source"] == "signal" and g["warming_up"] is True
+            assert tot["generator_running"] is True
+            assert any("cam switch" in w for w in tot["generator_warnings"])  # porch is selected
+            r = await c.put(f"/api/generators/{name}/signal", json={"contactor": True})
+            g = next(x for x in (await c.get("/api/state")).json()["total"]["generators"] if x["name"] == name)
+            assert g["contactor"] is True and g["warming_up"] is False
+            r = await c.put(f"/api/generators/{name}/signal", json={"running": False})
+            g = next(x for x in (await c.get("/api/state")).json()["total"]["generators"] if x["name"] == name)
+            assert g["running"] is False
+            summary = (await c.get("/api/generators")).json()
+            assert summary["generators"][0]["signal"]["running"] is False
+            assert summary["generators"][0]["signal_topics"]["running"].startswith("solardash/generator/")
+            r = await c.put("/api/generators/Nope/signal", json={"running": True})
+            assert r.status_code == 404
             r = await c.get("/")
             assert r.status_code == 200 and b"solardash" in r.content
             r = await c.get("/healthz")

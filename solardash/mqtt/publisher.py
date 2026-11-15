@@ -98,11 +98,37 @@ def _unit_and_class(topic_metric: str) -> tuple[str | None, str | None, str | No
     return None, None, None
 
 
+TRUE_WORDS = {"on", "true", "1", "yes", "running", "closed", "open_contact_closed"}
+FALSE_WORDS = {"off", "false", "0", "no", "stopped", "open", "unavailable", "unknown"}
+
+
+def parse_bool_payload(payload: str) -> bool | None:
+    p = payload.strip().strip('"').lower()
+    if p in TRUE_WORDS:
+        return True
+    if p in FALSE_WORDS:
+        return False
+    try:
+        return float(p) != 0.0
+    except ValueError:
+        return None
+
+
 class MqttPublisher:
-    def __init__(self, cfg: MqttConfig, state: SystemState, write_setting: Callable[[str, Any], Any] | None = None) -> None:
+    def __init__(
+        self,
+        cfg: MqttConfig,
+        state: SystemState,
+        write_setting: Callable[[str, Any], Any] | None = None,
+        signal_topics: dict[str, tuple[str, str]] | None = None,
+        on_signal: Callable[[str, bool | None, bool | None], Any] | None = None,
+    ) -> None:
         self.cfg = cfg
         self.state = state
         self.write_setting = write_setting
+        # topic -> (generator name, "running"|"contactor")
+        self.signal_topics = signal_topics or {}
+        self.on_signal = on_signal
         self._client = None
         self._discovered: set[str] = set()
         self._last: dict[str, str] = {}
@@ -129,6 +155,9 @@ class MqttPublisher:
         log.info("mqtt: connected to %s:%d", self.cfg.host, self.cfg.port)
         client.publish(f"{self.cfg.prefix}/solardash/status", "online", retain=True)
         client.subscribe(f"{self.cfg.prefix}/inverter_1/+/set")
+        for topic in self.signal_topics:
+            client.subscribe(topic)
+            log.info("mqtt: listening for generator signal on %s", topic)
         self._discovered.clear()
         self._last.clear()
 
@@ -137,6 +166,17 @@ class MqttPublisher:
         log.warning("mqtt: disconnected (%s)", reason_code)
 
     def _on_message(self, client, userdata, msg) -> None:
+        if msg.topic in self.signal_topics and self.on_signal is not None:
+            name, kind = self.signal_topics[msg.topic]
+            val = parse_bool_payload(msg.payload.decode(errors="replace"))
+            if val is None:
+                log.warning("mqtt: unparseable payload %r on %s", msg.payload, msg.topic)
+                return
+            try:
+                self.on_signal(name, val if kind == "running" else None, val if kind == "contactor" else None)
+            except Exception as e:  # noqa: BLE001
+                log.warning("mqtt: signal handling failed: %s", e)
+            return
         parts = msg.topic.split("/")
         if len(parts) != 4 or parts[-1] != "set":
             return
@@ -234,6 +274,13 @@ class MqttPublisher:
             topic = f"{p}/total/{key}/state"
             self._discover("total", "Totals", key, topic)
             self._pub(topic, val)
+        for i, g in enumerate(self.state.derived.get("generators", []), 1):
+            for key in ("name", "active", "running", "source", "contactor", "warming_up", "delivering", "runtime_today_h"):
+                if g.get(key) is not None:
+                    topic = f"{p}/generator_{i}/{key}/state"
+                    if key == "runtime_today_h":
+                        self._discover(f"generator_{i}", g["name"], "runtime_today_h", topic)
+                    self._pub(topic, g[key])
         cvd = self.state.chargeverter
         if cvd:
             for key in ("charger_online", "battery_answering", "poll_count", "mode", "presented_soc", "answered"):

@@ -59,10 +59,12 @@ class Service:
         self._stop = asyncio.Event()
         self._runtime_day: str | None = None
         self._runtime: dict[str, float] = {}  # generator name -> hours today
-        self._running_prev: bool | None = None
+        self._running_prev: dict[str, bool | None] = {}
         self._raw_running: bool = False
         self._raw_since: float = 0.0
         self._last_track: float | None = None
+        # external signals per generator: {"running": bool|None, "contactor": bool|None, "updated": ts}
+        self.signals: dict[str, dict[str, Any]] = {}
         self._build()
 
     # -- construction ------------------------------------------------------------
@@ -91,7 +93,14 @@ class Service:
             link = SimulatedChargeverterLink(world, with_battery=(cfg.chargeverter.mode == "sniff")) if world else None
             self.chargeverter = ChargeverterTask(cfg.chargeverter, self.state, link=link)
         if cfg.mqtt.enabled:
-            self.mqtt = MqttPublisher(cfg.mqtt, self.state, write_setting=self.write_setting_blocking)
+            topics: dict[str, tuple[str, str]] = {}
+            for g in cfg.generators:
+                if g.running_topic:
+                    topics[g.running_topic] = (g.name, "running")
+                if g.contactor_topic:
+                    topics[g.contactor_topic] = (g.name, "contactor")
+            self.mqtt = MqttPublisher(cfg.mqtt, self.state, write_setting=self.write_setting_blocking,
+                                      signal_topics=topics, on_signal=self.set_generator_signal)
 
     # -- lifecycle -----------------------------------------------------------------
     async def start(self) -> None:
@@ -204,8 +213,53 @@ class Service:
             self.store.add_event("info", "generator", f"cam switch set to {name}")
         return name
 
+    def set_generator_signal(self, name: str, running: bool | None = None, contactor: bool | None = None) -> dict:
+        """Record an external signal (from Home Assistant via MQTT or REST)."""
+        if name not in self.generator_names:
+            raise KeyError(f"unknown generator {name!r}; configured: {self.generator_names}")
+        sig = self.signals.setdefault(name, {"running": None, "contactor": None, "updated": 0.0})
+        changed = False
+        if running is not None and sig["running"] != running:
+            sig["running"] = running
+            changed = True
+        if contactor is not None and sig["contactor"] != contactor:
+            sig["contactor"] = contactor
+            changed = True
+        sig["updated"] = time.time()
+        if changed:
+            self.store.add_event("info", "generator", f"{name}: signal running={sig['running']} contactor={sig['contactor']}")
+            self._track_generators()
+            self.state.bus.publish("total", None)
+        return dict(sig)
+
+    def _generator_by_name(self, name: str):
+        for g in self.cfg.generators:
+            if g.name == name:
+                return g
+        return None
+
+    def _inferred_running(self, now: float) -> bool:
+        """Debounced 'Chargeverter is delivering power' from the BMS/inverter inference."""
+        d = self.state.derived
+        raw = bool((d.get("chargeverter_power") or 0) > 0)
+        if raw != self._raw_running:
+            self._raw_running, self._raw_since = raw, now
+        held = now - self._raw_since
+        prev = bool(d.get("_inferred_running_prev", False))
+        if raw and not prev and held >= GEN_ON_DELAY_S:
+            prev = True
+        elif not raw and prev and held >= GEN_OFF_DELAY_S:
+            prev = False
+        d["_inferred_running_prev"] = prev
+        return prev
+
     def _track_generators(self) -> None:
-        """Accrue Chargeverter run time to whichever generator the cam switch selects."""
+        """Per-generator running state and run hours.
+
+        A generator with a fresh external signal uses it (engine hours, including
+        warm-up before the contactor closes). Otherwise the cam-switch-selected
+        generator is "running" while the Chargeverter is inferred to deliver power.
+        """
         now = time.time()
         day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         names = self.generator_names
@@ -218,41 +272,61 @@ class Service:
         self._last_track = now
         d = self.state.derived
         active = self.active_generator()
-        # Debounce: the inferred Chargeverter power is the difference of two
-        # independently-timed measurements, so brief spikes happen. Require the
-        # raw state to hold for a while before counting a start or a stop.
-        raw = bool(d.get("generator_running"))
-        if raw != self._raw_running:
-            self._raw_running, self._raw_since = raw, now
-        held = now - self._raw_since
-        running = self._running_prev or False
-        if raw and not running and held >= GEN_ON_DELAY_S:
-            running = True
-        elif not raw and running and held >= GEN_OFF_DELAY_S:
-            running = False
-        d["generator_running"] = running
-        if running:
-            self._runtime[active] = self._runtime.get(active, 0.0) + dt_h
-        if self._running_prev is not None and self._running_prev != running:
-            self.store.add_event("info", "generator", f"{active} {'started' if running else 'stopped'}")
-        self._running_prev = running
+        delivering = self._inferred_running(now)
+        gens = []
+        any_running = False
+        warnings: list[str] = []
+        for n in names:
+            cfg = self._generator_by_name(n)
+            sig = self.signals.get(n)
+            stale_s = cfg.signal_stale_s if cfg else 6 * 3600
+            fresh = sig is not None and sig.get("running") is not None and now - sig["updated"] <= stale_s
+            if fresh:
+                running = bool(sig["running"])
+                source = "signal"
+                contactor = sig.get("contactor")
+            else:
+                running = delivering and n == active
+                source = "inferred"
+                contactor = None
+            if running:
+                self._runtime[n] = self._runtime.get(n, 0.0) + dt_h
+                any_running = True
+            prev = self._running_prev.get(n)
+            if prev is not None and prev != running:
+                self.store.add_event("info", "generator", f"{n} {'started' if running else 'stopped'} ({source})")
+            self._running_prev[n] = running
+            warming_up = bool(running and source == "signal" and contactor is False)
+            if running and source == "signal" and n != active:
+                warnings.append(f"{n} is running but the cam switch is set to {active}.")
+            if running and source == "signal" and contactor is True and not delivering and d.get("chargeverter_power") is not None:
+                warnings.append(f"{n} contactor is closed but no Chargeverter output is seen.")
+            gens.append({
+                "name": n, "active": n == active, "running": running, "source": source,
+                "contactor": contactor, "warming_up": warming_up, "delivering": bool(running and (delivering or (contactor and n == active))),
+                "runtime_today_h": round(self._runtime.get(n, 0.0), 2),
+                "signal_age_s": None if sig is None else round(now - sig["updated"]),
+            })
+        d["generator_running"] = any_running
         d["generator_active"] = active
         d["generator_runtime_today_h"] = round(self._runtime.get(active, 0.0), 2)
-        d["generators"] = [
-            {"name": n, "active": n == active, "running": running and n == active,
-             "runtime_today_h": round(self._runtime.get(n, 0.0), 2)}
-            for n in names
-        ]
+        d["generators"] = gens
+        d["generator_warnings"] = warnings
         if d.get("ac_input_live"):
             d["ac_input_warning"] = "The inverter's AC input is live, but nothing is expected to be connected there."
 
     def generator_summary(self) -> dict:
         today = {n: round(self._runtime.get(n, 0.0), 2) for n in self.generator_names}
+        live = {g["name"]: g for g in self.state.derived.get("generators", [])}
         return {
             "active": self.active_generator(),
+            "warnings": self.state.derived.get("generator_warnings", []),
             "generators": [
                 {"name": g.name, "notes": g.notes, "runtime_today_h": today.get(g.name, 0.0),
                  "runtime_total_h": round(self.store.daily_sum(runtime_metric(g.name)), 1),
+                 "signal_topics": {k: v for k, v in (("running", g.running_topic), ("contactor", g.contactor_topic)) if v},
+                 "signal": self.signals.get(g.name),
+                 "status": live.get(g.name),
                  "daily": self.store.daily_series(runtime_metric(g.name), 60)}
                 for g in self.cfg.generators
             ],

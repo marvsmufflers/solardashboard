@@ -64,6 +64,16 @@ class ChargeverterConfig:
 class GeneratorConfig:
     name: str = "Generator"
     notes: str = ""
+    # Optional external "running" signal (e.g. a 12 V sense wire read by a
+    # Waveshare Modbus relay in Home Assistant). When set, run hours for this
+    # generator come from the signal instead of Chargeverter-output inference.
+    # Either subscribe to an MQTT topic (payload on/off, true/false, 1/0) ...
+    running_topic: str = ""
+    # ... and/or let Home Assistant call PUT /api/generators/<name>/signal.
+    # Optional second signal: is the contactor to the Chargeverter closed?
+    contactor_topic: str = ""
+    # a signal older than this is ignored (falls back to inference)
+    signal_stale_s: float = 6 * 3600
 
 
 @dataclass
@@ -102,7 +112,9 @@ class Config:
     chargeverter: ChargeverterConfig = field(default_factory=ChargeverterConfig)
     # The generators that can feed the Chargeverter (one at a time, via the cam switch).
     generators: list[GeneratorConfig] = field(default_factory=lambda: [
-        GeneratorConfig("Outhouse generator (auto-start)", "Honda EU3000is, remote start"),
+        GeneratorConfig("Outhouse generator (auto-start)", "Honda EU3000is, remote start",
+                        running_topic="solardash/generator/outhouse/running",
+                        contactor_topic="solardash/generator/outhouse/contactor"),
         GeneratorConfig("Porch generator", "Honda EU3000is, plugged in during winter stays"),
     ])
     history: HistoryConfig = field(default_factory=HistoryConfig)

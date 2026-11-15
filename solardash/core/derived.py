@@ -134,7 +134,7 @@ def compute_totals(inverter: dict, batteries: dict[int, dict], chargeverter: dic
     t.update(infer_chargeverter_power(bank, inverter, threshold_w))
     # The generators only reach the battery through the Chargeverter.
     t["generator_power"] = t.get("chargeverter_power")
-    t["generator_running"] = bool((t.get("chargeverter_power") or 0) > 0)
+    t["generator_running"] = bool((t.get("chargeverter_power") or 0) > 0)  # raw; service debounces/overrides
     if chargeverter:
         t["chargeverter_online"] = chargeverter.get("charger_online")
         t["chargeverter_soc_reported"] = (chargeverter.get("last_reply") or {}).get("soc")

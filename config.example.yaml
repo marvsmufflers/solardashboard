@@ -49,8 +49,14 @@ chargeverter:
 generators:
   - name: Outhouse generator (auto-start)
     notes: Honda EU3000is, remote start
+    # Home Assistant knows when this one runs (12 V sense wire on a Waveshare
+    # Modbus relay). Publish that state here (retained) and solardash uses it
+    # for run hours and shows "warming up" until the contactor closes.
+    running_topic: solardash/generator/outhouse/running
+    contactor_topic: solardash/generator/outhouse/contactor
+    signal_stale_s: 21600
   - name: Porch generator
-    notes: Honda EU3000is, plugged in during winter stays
+    notes: Honda EU3000is, plugged in during winter stays (no sense wire; inferred from Chargeverter output)
 
 history:
   path: data/solardash.db

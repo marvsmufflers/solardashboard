@@ -15,6 +15,15 @@ means "generator running", and run time accrues to the selected generator: per-d
 `daily_energy` table (`generator_runtime_h/<name>`), lifetime totals on `/api/generators`, start/stop
 and cam-switch events in the event log. Handy for EU3000is oil-change intervals.
 
+The auto-start generator has a 12 V run-sense wire read by a Waveshare Modbus relay in Home Assistant;
+HA waits ~90 s for warm-up before closing the contactor to the Chargeverter. solardash accepts both
+states per generator (`running_topic` / `contactor_topic` over MQTT, or `PUT
+/api/generators/<name>/signal`). A fresh signal wins over inference for that generator, which gives
+true engine hours including warm-up, and a "warming up" state while running with the contactor open.
+Cross-checks raise warnings: signal says running but the cam switch selects the other generator; or
+contactor closed but no Chargeverter output is inferred. Signals older than `signal_stale_s` are
+ignored so a dead HA link falls back to inference.
+
 If the inverter's AC input ever shows voltage, the dashboard flags it as unexpected.
 
 Devices:

@@ -33,6 +33,11 @@ class GeneratorSelect(BaseModel):
     name: str
 
 
+class GeneratorSignal(BaseModel):
+    running: bool | None = None
+    contactor: bool | None = None
+
+
 class SettingWrite(BaseModel):
     value: Any
     confirm: bool = False
@@ -113,6 +118,14 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         svc._track_generators()
         svc.state.bus.publish("total", None)
         return {"active": name}
+
+    @app.put("/api/generators/{name}/signal")
+    async def api_generator_signal(name: str, body: GeneratorSignal):
+        """For Home Assistant: PUT {"running": true, "contactor": false}."""
+        try:
+            return await asyncio.to_thread(svc.set_generator_signal, name, body.running, body.contactor)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
 
     @app.get("/api/history/metrics")
     async def api_history_metrics():

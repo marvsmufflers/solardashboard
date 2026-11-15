@@ -52,8 +52,14 @@
     const bp = tot.battery_power;
     $("#t-batt-sub").textContent = bp == null ? "" : `${bp >= 0 ? "charging" : "discharging"} ${fmtW(Math.abs(bp))} · ${fmt(tot.battery_voltage, 1, "V")} ${fmt(tot.battery_current, 1, "A")} · ${fmt(tot.battery_temperature, 1, "°C")} · ${tot.battery_source === "bms" ? tot.battery_count + " packs" : "inverter data"}`;
     const gp = tot.generator_power;
-    $("#t-gen").textContent = gp == null ? "no data" : tot.generator_running ? fmtW(gp) : "off";
-    $("#t-gen-sub").textContent = `${tot.generator_active || ""}${tot.generator_runtime_today_h != null ? ` · ${tot.generator_runtime_today_h.toFixed(1)} h today` : ""}${gp == null ? " · needs BMS + inverter data" : ""}`;
+    const runningGens = (tot.generators || []).filter((g) => g.running);
+    const warming = runningGens.find((g) => g.warming_up);
+    $("#t-gen").textContent = warming && !(gp > 0) ? "warming up" : runningGens.length ? (gp > 0 ? fmtW(gp) : "running") : gp == null ? "no data" : "off";
+    const parts = [];
+    runningGens.forEach((g) => parts.push(`${g.name} (${g.source === "signal" ? "sense wire" : "inferred"}${g.contactor === true ? ", contactor closed" : g.contactor === false ? ", contactor open" : ""})`));
+    if (!runningGens.length) parts.push(`${tot.generator_active || ""} selected · ${(tot.generator_runtime_today_h ?? 0).toFixed(1)} h today`);
+    (tot.generator_warnings || []).forEach((w) => parts.push("⚠ " + w));
+    $("#t-gen-sub").textContent = parts.join(" · ");
     renderGenSelect(tot);
     $("#t-cv").textContent = cv.mode ? (cv.charger_online ? "polling" : "silent") : "not wired";
     $("#t-cv-sub").textContent = cv.mode ? `${cv.mode}${cv.presented_soc != null ? ` · telling it ${cv.presented_soc}%` : ""}${cv.last_reply?.soc != null ? ` · bus SOC ${cv.last_reply.soc}%` : ""}` : (tot.chargeverter_power_raw != null ? `raw ${fmtW(tot.chargeverter_power_raw)} (bms − inverter)` : "add an RS485 link to see its SOC bus");
@@ -62,7 +68,8 @@
       ["Battery charged", fmt(inv.battery_charge_energy_today, 1, "kWh")], ["Battery discharged", fmt(inv.battery_discharge_energy_today, 1, "kWh")],
       ["Solar lifetime", fmt(inv.pv_energy_total, 0, "kWh")], ["Inverter AC input", tot.ac_input_live ? "LIVE – unexpected" : "nothing connected"],
     ]);
-    kv($("#gen-hours"), (tot.generators || []).map((g) => [g.name + (g.active ? " (selected)" : ""), `${g.runtime_today_h.toFixed(2)} h today${g.running ? " · running" : ""}${genTotals[g.name] != null ? ` · ${genTotals[g.name].toFixed(1)} h total` : ""}`]));
+    kv($("#gen-hours"), (tot.generators || []).map((g) => [g.name + (g.active ? " (selected)" : ""),
+      `${g.runtime_today_h.toFixed(2)} h today${genTotals[g.name] != null ? ` · ${genTotals[g.name].toFixed(1)} h total` : ""} · ${g.running ? (g.warming_up ? "warming up" : "running") : "off"} (${g.source === "signal" ? "sense wire" : "inferred"})`]));
     renderBatteries(); renderInverter(); renderCv();
     if (document.querySelector('nav button[data-tab="system"]').classList.contains("active")) renderDevices();
   }
