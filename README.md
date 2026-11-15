@@ -3,12 +3,12 @@
 Local, self-hosted monitoring and control for an **off-grid cabin** built from an **EG4 6000XP**,
 **Eco-Worthy 48V 100Ah server-rack batteries** (JBD BMS), an **EG4 Chargeverter GC** and Honda
 EU3000is generators – a replacement for Solar Assistant that runs in Docker on a NAS or on a
-Raspberry Pi. There is no grid anywhere in the data model: the inverter's AC input is treated as a
-generator input.
+Raspberry Pi. There is no grid anywhere in the data model; the generators feed the battery through the
+Chargeverter.
 
 * Live dashboard (power flow, SOC, per-cell battery view, inverter details) with history charts
-* Two generator paths tracked separately with friendly names (`inverter.ac_input_name`,
-  `chargeverter.generator_name`): power, energy, start/stop events and run hours per day
+* Generator tracking for the Hondas that feed the Chargeverter: pick which one is on the cam switch in
+  the UI, and solardash logs start/stop events and run hours per generator (per day and lifetime)
 * Reads the inverter over Modbus RTU (RS485) and each battery over the JBD protocol – no cloud
 * Inverter settings read/write with range checks and confirmation for risky ones (opt-in)
 * Chargeverter support: listen to its battery bus, infer its output power, and optionally answer its

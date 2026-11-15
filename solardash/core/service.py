@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 INVERTER_HISTORY_KEYS = [
     "pv_power", "pv1_power", "pv2_power", "pv1_voltage", "pv2_voltage", "battery_power", "battery_voltage",
     "battery_soc", "load_power", "eps_power", "eps_l1_power", "eps_l2_power", "eps_voltage", "eps_frequency",
-    "ac_input_voltage", "ac_input_frequency", "ac_input_power", "generator_power", "rectifier_power", "temperature_inner",
+    "ac_input_voltage", "ac_input_frequency", "ac_input_power", "ac_input_total_power", "rectifier_power", "temperature_inner",
     "temperature_radiator_1", "temperature_radiator_2", "temperature_battery", "bms_battery_current",
     "bus_voltage_1", "status_code", "fault_code", "warning_code",
 ]
@@ -35,9 +35,15 @@ TOTAL_HISTORY_KEYS = [
 BATTERY_HISTORY_KEYS = ["voltage", "current", "power", "soc", "temperature", "cell_min", "cell_max", "cell_imbalance"]
 DAILY_ENERGY_KEYS = [
     "pv_energy_today", "load_energy_today", "battery_charge_energy_today", "battery_discharge_energy_today",
-    "rectifier_energy_today", "ac_input_energy_today", "generator_energy_today", "eps_energy_today",
+    "rectifier_energy_today", "ac_input_energy_today", "ac_input_total_energy_today", "eps_energy_today",
 ]
-RUNTIME_KEYS = ("generator_inverter_runtime_h", "generator_chargeverter_runtime_h")
+ACTIVE_GENERATOR_KEY = "active_generator"
+GEN_ON_DELAY_S = 20.0   # inferred output must persist this long to count as "running"
+GEN_OFF_DELAY_S = 45.0  # and be gone this long to count as "stopped"
+
+
+def runtime_metric(name: str) -> str:
+    return f"generator_runtime_h/{name}"
 
 
 class Service:
@@ -52,8 +58,11 @@ class Service:
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
         self._runtime_day: str | None = None
-        self._runtime: dict[str, float] = {k: 0.0 for k in RUNTIME_KEYS}
-        self._running_prev: dict[str, bool] = {}
+        self._runtime: dict[str, float] = {}  # generator name -> hours today
+        self._running_prev: bool | None = None
+        self._raw_running: bool = False
+        self._raw_since: float = 0.0
+        self._last_track: float | None = None
         self._build()
 
     # -- construction ------------------------------------------------------------
@@ -122,8 +131,6 @@ class Service:
                     self.state.inverter, self.state.batteries, self.state.chargeverter,
                     threshold_w=self.cfg.chargeverter.power_threshold_w,
                 )
-                self.state.derived["generator_inverter_name"] = self.cfg.inverter.ac_input_name
-                self.state.derived["generator_chargeverter_name"] = self.cfg.chargeverter.generator_name
                 self._track_generators()
                 self.state.bus.publish("total", None)
                 # device up/down events
@@ -171,45 +178,85 @@ class Service:
                     if daily:
                         await asyncio.to_thread(self.store.set_daily_energy, day, daily)
                 if self._runtime_day == datetime.fromtimestamp(ts).strftime("%Y-%m-%d"):
-                    await asyncio.to_thread(self.store.set_daily_energy, self._runtime_day, dict(self._runtime))
+                    await asyncio.to_thread(self.store.set_daily_energy, self._runtime_day,
+                                            {runtime_metric(n): h for n, h in self._runtime.items()})
                 await asyncio.to_thread(self.store.maybe_rollup)
             except Exception as e:  # noqa: BLE001
                 log.exception("sample loop: %s", e)
             await asyncio.sleep(interval)
 
     # -- generator run hours -------------------------------------------------------
+    @property
+    def generator_names(self) -> list[str]:
+        return [g.name for g in self.cfg.generators] or ["Generator"]
+
+    def active_generator(self) -> str:
+        names = self.generator_names
+        stored = self.store.get_kv(ACTIVE_GENERATOR_KEY)
+        return stored if stored in names else names[0]
+
+    def set_active_generator(self, name: str) -> str:
+        if name not in self.generator_names:
+            raise KeyError(f"unknown generator {name!r}; configured: {self.generator_names}")
+        prev = self.active_generator()
+        if prev != name:
+            self.store.set_kv(ACTIVE_GENERATOR_KEY, name)
+            self.store.add_event("info", "generator", f"cam switch set to {name}")
+        return name
+
     def _track_generators(self) -> None:
-        """Accumulate run hours per generator path and log start/stop events."""
+        """Accrue Chargeverter run time to whichever generator the cam switch selects."""
         now = time.time()
         day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        names = self.generator_names
         if self._runtime_day != day:
-            # new day (or first run): load whatever was already recorded today
             stored = self.store.daily_energy(2).get(day, {})
-            self._runtime = {k: float(stored.get(k, 0.0)) for k in RUNTIME_KEYS}
+            self._runtime = {n: float(stored.get(runtime_metric(n), 0.0)) for n in names}
             self._runtime_day = day
             self._last_track = now
-        dt_h = (now - getattr(self, "_last_track", now)) / 3600.0
+        dt_h = (now - (self._last_track or now)) / 3600.0
         self._last_track = now
         d = self.state.derived
-        inv_fresh = self.state.inverter_updated is not None and now - self.state.inverter_updated < 60
-        running = {
-            "generator_inverter_runtime_h": bool(inv_fresh and d.get("generator_running")),
-            "generator_chargeverter_runtime_h": bool((d.get("chargeverter_power") or 0) > 0),
+        active = self.active_generator()
+        # Debounce: the inferred Chargeverter power is the difference of two
+        # independently-timed measurements, so brief spikes happen. Require the
+        # raw state to hold for a while before counting a start or a stop.
+        raw = bool(d.get("generator_running"))
+        if raw != self._raw_running:
+            self._raw_running, self._raw_since = raw, now
+        held = now - self._raw_since
+        running = self._running_prev or False
+        if raw and not running and held >= GEN_ON_DELAY_S:
+            running = True
+        elif not raw and running and held >= GEN_OFF_DELAY_S:
+            running = False
+        d["generator_running"] = running
+        if running:
+            self._runtime[active] = self._runtime.get(active, 0.0) + dt_h
+        if self._running_prev is not None and self._running_prev != running:
+            self.store.add_event("info", "generator", f"{active} {'started' if running else 'stopped'}")
+        self._running_prev = running
+        d["generator_active"] = active
+        d["generator_runtime_today_h"] = round(self._runtime.get(active, 0.0), 2)
+        d["generators"] = [
+            {"name": n, "active": n == active, "running": running and n == active,
+             "runtime_today_h": round(self._runtime.get(n, 0.0), 2)}
+            for n in names
+        ]
+        if d.get("ac_input_live"):
+            d["ac_input_warning"] = "The inverter's AC input is live, but nothing is expected to be connected there."
+
+    def generator_summary(self) -> dict:
+        today = {n: round(self._runtime.get(n, 0.0), 2) for n in self.generator_names}
+        return {
+            "active": self.active_generator(),
+            "generators": [
+                {"name": g.name, "notes": g.notes, "runtime_today_h": today.get(g.name, 0.0),
+                 "runtime_total_h": round(self.store.daily_sum(runtime_metric(g.name)), 1),
+                 "daily": self.store.daily_series(runtime_metric(g.name), 60)}
+                for g in self.cfg.generators
+            ],
         }
-        names = {
-            "generator_inverter_runtime_h": self.cfg.inverter.ac_input_name,
-            "generator_chargeverter_runtime_h": self.cfg.chargeverter.generator_name,
-        }
-        for k, on in running.items():
-            if on:
-                self._runtime[k] += dt_h
-            prev = self._running_prev.get(k)
-            if prev is not None and prev != on:
-                self.store.add_event("info", "generator", f"{names[k]} {'started' if on else 'stopped'}")
-            self._running_prev[k] = on
-            d[k.replace("_runtime_h", "_running")] = on
-        d["generator_inverter_runtime_today_h"] = round(self._runtime["generator_inverter_runtime_h"], 2)
-        d["generator_chargeverter_runtime_today_h"] = round(self._runtime["generator_chargeverter_runtime_h"], 2)
 
     # -- actions -----------------------------------------------------------------
     def write_setting_blocking(self, key: str, value: Any) -> dict:

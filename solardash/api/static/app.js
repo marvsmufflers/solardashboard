@@ -51,26 +51,38 @@
     $("#t-soc-bar").style.width = (soc || 0) + "%";
     const bp = tot.battery_power;
     $("#t-batt-sub").textContent = bp == null ? "" : `${bp >= 0 ? "charging" : "discharging"} ${fmtW(Math.abs(bp))} · ${fmt(tot.battery_voltage, 1, "V")} ${fmt(tot.battery_current, 1, "A")} · ${fmt(tot.battery_temperature, 1, "°C")} · ${tot.battery_source === "bms" ? tot.battery_count + " packs" : "inverter data"}`;
-    $("#t-gen-label").textContent = tot.generator_inverter_name || "Generator (inverter AC in)";
-    $("#t-gen").textContent = invOk ? (inv.generator_running ? fmtW(inv.generator_power) : "off") : "–";
-    $("#t-gen-sub").textContent = invOk ? (inv.generator_running ? `${fmt(inv.ac_input_voltage, 0, "V")} ${fmt(inv.ac_input_frequency, 2, "Hz")} · charging ${fmtW(inv.rectifier_power)} · loads ${fmtW(inv.ac_input_power)}` : `${fmt(tot.generator_inverter_runtime_today_h, 1, "h")} today · ${inv.status || ""}`) : "";
-    const cvp = tot.chargeverter_power;
-    $("#t-cv").textContent = cvp == null ? (cv.mode ? "no data" : "not configured") : fmtW(cvp);
-    $("#t-cv-sub").textContent = (tot.generator_chargeverter_name ? tot.generator_chargeverter_name + " · " : "") + (cv.mode ? `${cv.mode}: charger ${cv.charger_online ? "polling" : "silent"}${cv.presented_soc != null ? ` · telling it ${cv.presented_soc}%` : ""}${cv.last_reply?.soc != null ? ` · bus SOC ${cv.last_reply.soc}%` : ""}` : (tot.chargeverter_power_raw != null ? `raw ${fmtW(tot.chargeverter_power_raw)} (bms − inverter)` : ""));
+    const gp = tot.generator_power;
+    $("#t-gen").textContent = gp == null ? "no data" : tot.generator_running ? fmtW(gp) : "off";
+    $("#t-gen-sub").textContent = `${tot.generator_active || ""}${tot.generator_runtime_today_h != null ? ` · ${tot.generator_runtime_today_h.toFixed(1)} h today` : ""}${gp == null ? " · needs BMS + inverter data" : ""}`;
+    renderGenSelect(tot);
+    $("#t-cv").textContent = cv.mode ? (cv.charger_online ? "polling" : "silent") : "not wired";
+    $("#t-cv-sub").textContent = cv.mode ? `${cv.mode}${cv.presented_soc != null ? ` · telling it ${cv.presented_soc}%` : ""}${cv.last_reply?.soc != null ? ` · bus SOC ${cv.last_reply.soc}%` : ""}` : (tot.chargeverter_power_raw != null ? `raw ${fmtW(tot.chargeverter_power_raw)} (bms − inverter)` : "add an RS485 link to see its SOC bus");
     kv($("#energy-today"), [
       ["Solar", fmt(inv.pv_energy_today, 1, "kWh")], ["Load", fmt(inv.load_energy_today ?? inv.eps_energy_today, 1, "kWh")],
       ["Battery charged", fmt(inv.battery_charge_energy_today, 1, "kWh")], ["Battery discharged", fmt(inv.battery_discharge_energy_today, 1, "kWh")],
-      ["Generator → battery (inverter)", fmt(inv.rectifier_energy_today, 1, "kWh")], ["Generator → loads (pass-through)", fmt(inv.ac_input_energy_today, 1, "kWh")],
-      ["Generator total (inverter path)", fmt(inv.generator_energy_today, 1, "kWh")], ["Solar lifetime", fmt(inv.pv_energy_total, 0, "kWh")],
+      ["Solar lifetime", fmt(inv.pv_energy_total, 0, "kWh")], ["Inverter AC input", tot.ac_input_live ? "LIVE – unexpected" : "nothing connected"],
     ]);
-    kv($("#gen-hours"), [
-      [tot.generator_inverter_name || "Inverter AC input", `${fmt(tot.generator_inverter_runtime_today_h, 2, "h")}${tot.generator_inverter_running ? " · running" : ""}`],
-      [tot.generator_chargeverter_name || "Chargeverter", `${fmt(tot.generator_chargeverter_runtime_today_h, 2, "h")}${tot.generator_chargeverter_running ? " · running" : ""}`],
-    ]);
+    kv($("#gen-hours"), (tot.generators || []).map((g) => [g.name + (g.active ? " (selected)" : ""), `${g.runtime_today_h.toFixed(2)} h today${g.running ? " · running" : ""}${genTotals[g.name] != null ? ` · ${genTotals[g.name].toFixed(1)} h total` : ""}`]));
     renderBatteries(); renderInverter(); renderCv();
     if (document.querySelector('nav button[data-tab="system"]').classList.contains("active")) renderDevices();
   }
 
+  let genTotals = {}, genSelectBuilt = false;
+  function renderGenSelect(tot) {
+    const sel = $("#gen-select"); const gens = tot.generators || [];
+    if (!genSelectBuilt && gens.length) {
+      sel.innerHTML = gens.map((g) => `<option value="${g.name}">${g.name}</option>`).join("");
+      sel.addEventListener("change", async () => {
+        const r = await fetch("/api/generators/active", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: sel.value }) });
+        toast(r.ok ? `Run hours now go to ${sel.value}` : "Could not change generator"); loadGenTotals();
+      });
+      genSelectBuilt = true;
+    }
+    if (document.activeElement !== sel && tot.generator_active) sel.value = tot.generator_active;
+  }
+  async function loadGenTotals() {
+    try { const d = await (await fetch("/api/generators")).json(); genTotals = Object.fromEntries(d.generators.map((g) => [g.name, g.runtime_total_h])); } catch (e) {}
+  }
   function renderBatteries() {
     const tot = state.total || {};
     kv($("#bank"), [
@@ -113,16 +125,15 @@
       ["Battery (inverter)", `${fmt(inv.battery_voltage, 1, "V")} · ${inv.battery_soc ?? "–"} % · ${fmtW(inv.battery_power)}`], ["Battery current (BMS via inverter)", fmt(inv.bms_battery_current, 1, "A")],
       ["AC output", `${fmt(inv.eps_voltage, 1, "V")} ${fmt(inv.eps_frequency, 2, "Hz")} · ${fmtW(inv.eps_power)} / ${fmt(inv.eps_apparent_power, 0, "VA")}`],
       ["AC output L1 / L2", `${fmt(inv.eps_l1_voltage, 1, "V")} ${fmtW(inv.eps_l1_power)} · ${fmt(inv.eps_l2_voltage, 1, "V")} ${fmtW(inv.eps_l2_power)}`],
-      ["Load", fmtW(inv.load_power)], ["Generator (AC input)", `${inv.generator_running ? "running" : "off"} · ${fmt(inv.ac_input_voltage, 1, "V")} ${fmt(inv.ac_input_frequency, 2, "Hz")}`],
-      ["Generator → loads / → battery", `${fmtW(inv.ac_input_power)} / ${fmtW(inv.rectifier_power)}`], ["AC input configured as", inv.ac_input_is_generator ? "generator" : "utility (set GEN mode)"], ["Inverter power", fmtW(inv.inverter_power)],
+      ["Load", fmtW(inv.load_power)], ["AC input (unused)", `${inv.ac_input_live ? "LIVE" : "dead"} · ${fmt(inv.ac_input_voltage, 1, "V")} ${fmt(inv.ac_input_frequency, 2, "Hz")} · ${fmtW(inv.ac_input_total_power)}`],
+      ["AC input mode", inv.ac_input_is_generator ? "generator" : "utility"], ["Inverter power", fmtW(inv.inverter_power)],
       ["Temperatures", `inner ${fmt(inv.temperature_inner, 0, "°C")} · rad1 ${fmt(inv.temperature_radiator_1, 0, "°C")} · rad2 ${fmt(inv.temperature_radiator_2, 0, "°C")} · bat ${fmt(inv.temperature_battery, 0, "°C")}`],
       ["Faults", (inv.faults || []).join(", ") || "none"], ["Warnings", (inv.warnings || []).join(", ") || "none"],
     ]);
     kv($("#inv-energy"), [
       ["PV today", fmt(inv.pv_energy_today, 1, "kWh")], ["PV lifetime", fmt(inv.pv_energy_total, 1, "kWh")], ["Load today", fmt(inv.load_energy_today, 1, "kWh")],
       ["EPS today / lifetime", `${fmt(inv.eps_energy_today, 1)} / ${fmt(inv.eps_energy_total, 0)} kWh`], ["Charged today / lifetime", `${fmt(inv.battery_charge_energy_today, 1)} / ${fmt(inv.battery_charge_energy_total, 0)} kWh`],
-      ["Discharged today / lifetime", `${fmt(inv.battery_discharge_energy_today, 1)} / ${fmt(inv.battery_discharge_energy_total, 0)} kWh`], ["Generator → loads today / lifetime", `${fmt(inv.ac_input_energy_today, 1)} / ${fmt(inv.ac_input_energy_total, 0)} kWh`],
-      ["Generator → battery today / lifetime", `${fmt(inv.rectifier_energy_today, 1)} / ${fmt(inv.rectifier_energy_total, 0)} kWh`], ["Generator total today / lifetime", `${fmt(inv.generator_energy_today, 1)} / ${fmt(inv.generator_energy_total, 0)} kWh`],
+      ["Discharged today / lifetime", `${fmt(inv.battery_discharge_energy_today, 1)} / ${fmt(inv.battery_discharge_energy_total, 0)} kWh`], ["AC input today / lifetime", `${fmt(inv.ac_input_total_energy_today, 1)} / ${fmt(inv.ac_input_total_energy_total, 0)} kWh`],
     ]);
     kv($("#inv-bms"), [
       ["Comms type code", inv.battery_comms_type], ["Packs in parallel", inv.battery_parallel_count], ["Capacity", fmt(inv.battery_capacity_ah, 0, "Ah")],
@@ -176,14 +187,13 @@
     return { labels, cols: maps.map((m) => labels.map((t) => (m.has(t) ? m.get(t) : null))) };
   }
   async function loadPowerChart() {
-    const keys = ["total/pv_power", "total/load_power", "total/battery_power", "total/generator_power", "total/chargeverter_power"];
+    const keys = ["total/pv_power", "total/load_power", "total/battery_power", "total/generator_power"];
     const s = await fetchSeries(keys); const { labels, cols } = align(s, keys);
     upsert("chart-power", labels, [
       { label: "Solar", data: cols[0], borderColor: palette.pv, backgroundColor: palette.pv + "33", fill: true },
       { label: "Load", data: cols[1], borderColor: palette.load },
       { label: "Battery (+chg)", data: cols[2], borderColor: palette.batt },
-      { label: "Generator (inverter AC in)", data: cols[3], borderColor: palette.gen },
-      { label: "Chargeverter", data: cols[4], borderColor: palette.cv },
+      { label: "Generator (via Chargeverter)", data: cols[3], borderColor: palette.gen, backgroundColor: palette.gen + "33", fill: true },
     ], "W");
   }
   async function loadSocChart() {
@@ -258,6 +268,6 @@
     kv($("#dbstats"), [["Raw samples", st.raw_rows], ["Hourly rows", st.hourly_rows], ["Size", (st.db_bytes / 1048576).toFixed(1) + " MB"], ["Raw retention", st.retention_days + " days"]]);
   }
 
-  connect(); loadPowerChart(); loadSocChart();
+  connect(); loadPowerChart(); loadSocChart(); loadGenTotals();
   setInterval(() => { if (document.querySelector("#tab-overview").classList.contains("active")) { loadPowerChart(); loadSocChart(); } }, 60000);
 })();

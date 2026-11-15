@@ -29,6 +29,10 @@ RANGES = {"1h": 3600, "3h": 3 * 3600, "6h": 6 * 3600, "12h": 12 * 3600, "24h": 8
           "7d": 7 * 86400, "30d": 30 * 86400, "90d": 90 * 86400, "1y": 365 * 86400}
 
 
+class GeneratorSelect(BaseModel):
+    name: str
+
+
 class SettingWrite(BaseModel):
     value: Any
     confirm: bool = False
@@ -95,6 +99,20 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         return {"state": svc.state.chargeverter, "derived": {
             k: svc.state.derived.get(k) for k in ("chargeverter_power", "chargeverter_power_raw", "chargeverter_power_method")
         }}
+
+    @app.get("/api/generators")
+    async def api_generators():
+        return await asyncio.to_thread(svc.generator_summary)
+
+    @app.put("/api/generators/active")
+    async def api_generator_select(body: GeneratorSelect):
+        try:
+            name = await asyncio.to_thread(svc.set_active_generator, body.name)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+        svc._track_generators()
+        svc.state.bus.publish("total", None)
+        return {"active": name}
 
     @app.get("/api/history/metrics")
     async def api_history_metrics():

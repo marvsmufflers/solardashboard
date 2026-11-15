@@ -21,8 +21,6 @@ class InverterConfig:
     allow_writes: bool = False
     timeout: float = 1.0
     name: str = "EG4 6000XP"
-    # friendly name for whatever feeds the inverter's AC (GEN) input
-    ac_input_name: str = "Generator (inverter AC input)"
 
 
 @dataclass
@@ -57,11 +55,15 @@ class ChargeverterConfig:
     baud: int = 9600
     parity: str = "N"
     name: str = "EG4 Chargeverter GC"
-    # friendly name for the generator feeding the Chargeverter
-    generator_name: str = "Generator (Chargeverter)"
     # power inference: minimum derived power (W) to report as Chargeverter output
     power_threshold_w: float = 150.0
     emulate: ChargeverterEmulateConfig = field(default_factory=ChargeverterEmulateConfig)
+
+
+@dataclass
+class GeneratorConfig:
+    name: str = "Generator"
+    notes: str = ""
 
 
 @dataclass
@@ -98,6 +100,11 @@ class Config:
     inverter: InverterConfig = field(default_factory=InverterConfig)
     batteries: list[BatteryConfig] = field(default_factory=list)
     chargeverter: ChargeverterConfig = field(default_factory=ChargeverterConfig)
+    # The generators that can feed the Chargeverter (one at a time, via the cam switch).
+    generators: list[GeneratorConfig] = field(default_factory=lambda: [
+        GeneratorConfig("Outhouse generator (auto-start)", "Honda EU3000is, remote start"),
+        GeneratorConfig("Porch generator", "Honda EU3000is, plugged in during winter stays"),
+    ])
     history: HistoryConfig = field(default_factory=HistoryConfig)
     web: WebConfig = field(default_factory=WebConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
@@ -131,6 +138,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         inverter=_build(InverterConfig, raw.get("inverter")),
         batteries=[_build(BatteryConfig, b) for b in raw.get("batteries", [])],
         chargeverter=_build(ChargeverterConfig, raw.get("chargeverter")),
+        generators=[_build(GeneratorConfig, g) for g in raw["generators"]] if "generators" in raw else Config.__dataclass_fields__["generators"].default_factory(),  # type: ignore[misc]
         history=_build(HistoryConfig, raw.get("history")),
         web=_build(WebConfig, raw.get("web")),
         mqtt=_build(MqttConfig, raw.get("mqtt")),

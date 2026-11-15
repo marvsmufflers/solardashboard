@@ -75,6 +75,14 @@ async def test_full_stack(cfg):
             assert all(v["connected"] for v in r.json().values())
             r = await c.get("/api/chargeverter")
             assert r.json()["state"]["charger_online"] is True
+            r = await c.get("/api/generators")
+            g = r.json()
+            assert g["active"] == "Outhouse generator (auto-start)" and len(g["generators"]) == 2
+            r = await c.put("/api/generators/active", json={"name": "Porch generator"})
+            assert r.status_code == 200 and r.json()["active"] == "Porch generator"
+            assert (await c.get("/api/state")).json()["total"]["generator_active"] == "Porch generator"
+            r = await c.put("/api/generators/active", json={"name": "Nope"})
+            assert r.status_code == 404
             r = await c.get("/")
             assert r.status_code == 200 and b"solardash" in r.content
             r = await c.get("/healthz")

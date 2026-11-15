@@ -40,10 +40,10 @@ def test_decode_inputs_basic():
     assert out["pv1_energy_total"] == pytest.approx((0x10000 + 0x1234) * 0.1)
     assert out["temperature_battery"] == -5
     assert out["ac_input_is_generator"] is True
-    assert out["ac_input_voltage"] == 240.1 and out["generator_running"] is True
-    assert out["generator_power"] == 1900
-    assert out["generator_energy_today"] == 3.0
-    assert "grid_power" not in out
+    assert out["ac_input_voltage"] == 240.1 and out["ac_input_live"] is True
+    assert out["ac_input_total_power"] == 1900
+    assert out["ac_input_total_energy_today"] == 3.0
+    assert "grid_power" not in out and "generator_power" not in out
     assert out["bms_max_discharge_current"] == 300.0
     assert out["bms_battery_current"] == -5.0
     assert out["bms_cell_voltage_max"] == 3.261 and out["bms_cell_temp_max"] == 18.3

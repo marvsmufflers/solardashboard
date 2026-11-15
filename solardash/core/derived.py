@@ -115,17 +115,13 @@ def compute_totals(inverter: dict, batteries: dict[int, dict], chargeverter: dic
         ("eps_power", "ac_output_power"),
         ("eps_voltage", "ac_output_voltage"),
         ("eps_frequency", "ac_output_frequency"),
-        ("generator_power", "generator_power"),
-        ("generator_running", "generator_running"),
-        ("ac_input_voltage", "generator_voltage"),
-        ("ac_input_frequency", "generator_frequency"),
-        ("ac_input_power", "generator_passthrough_power"),
-        ("rectifier_power", "generator_charge_power"),
+        ("ac_input_live", "ac_input_live"),
+        ("ac_input_voltage", "ac_input_voltage"),
+        ("ac_input_total_power", "ac_input_power"),
         ("pv_energy_today", "pv_energy_today"),
         ("load_energy_today", "load_energy_today"),
         ("battery_charge_energy_today", "battery_energy_in_today"),
         ("battery_discharge_energy_today", "battery_energy_out_today"),
-        ("generator_energy_today", "generator_energy_today"),
         ("battery_power", "inverter_battery_power"),
         ("status", "inverter_status"),
         ("temperature_inner", "inverter_temperature"),
@@ -136,6 +132,9 @@ def compute_totals(inverter: dict, batteries: dict[int, dict], chargeverter: dic
     if "load_power" not in t and "ac_output_power" in t:
         t["load_power"] = t["ac_output_power"]
     t.update(infer_chargeverter_power(bank, inverter, threshold_w))
+    # The generators only reach the battery through the Chargeverter.
+    t["generator_power"] = t.get("chargeverter_power")
+    t["generator_running"] = bool((t.get("chargeverter_power") or 0) > 0)
     if chargeverter:
         t["chargeverter_online"] = chargeverter.get("charger_online")
         t["chargeverter_soc_reported"] = (chargeverter.get("last_reply") or {}).get("soc")

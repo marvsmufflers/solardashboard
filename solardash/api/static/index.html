@@ -27,8 +27,8 @@
     <div class="tile pv"><div class="label">Solar</div><div class="value" id="t-pv">–</div><div class="sub" id="t-pv-sub"></div></div>
     <div class="tile load"><div class="label">Load</div><div class="value" id="t-load">–</div><div class="sub" id="t-load-sub"></div></div>
     <div class="tile batt"><div class="label">Battery</div><div class="value" id="t-soc">–</div><div class="sub" id="t-batt-sub"></div><div class="bar"><div id="t-soc-bar"></div></div></div>
-    <div class="tile gen"><div class="label" id="t-gen-label">Generator (inverter AC in)</div><div class="value" id="t-gen">–</div><div class="sub" id="t-gen-sub"></div></div>
-    <div class="tile cv"><div class="label">Chargeverter</div><div class="value" id="t-cv">–</div><div class="sub" id="t-cv-sub"></div></div>
+    <div class="tile gen"><div class="label">Generator → Chargeverter</div><div class="value" id="t-gen">–</div><div class="sub" id="t-gen-sub"></div><div class="sub"><label>Cam switch: <select id="gen-select"></select></label></div></div>
+    <div class="tile cv"><div class="label">Chargeverter link</div><div class="value" id="t-cv">–</div><div class="sub" id="t-cv-sub"></div></div>
   </div>
   <div class="card">
     <div class="card-head"><h2>Power</h2>
@@ -39,7 +39,7 @@
   </div>
   <div class="two">
     <div class="card"><h2>State of charge</h2><div class="chart tall"><canvas id="chart-soc"></canvas></div></div>
-    <div class="card"><h2>Energy today</h2><div id="energy-today" class="kv"></div><h2 style="margin-top:14px">Generator run time today</h2><div id="gen-hours" class="kv"></div></div>
+    <div class="card"><h2>Energy today</h2><div id="energy-today" class="kv"></div><h2 style="margin-top:14px">Generator run hours</h2><div id="gen-hours" class="kv"></div></div>
   </div>
 </section>
 

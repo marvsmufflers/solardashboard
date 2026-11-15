@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS daily_energy (
     value  REAL,
     PRIMARY KEY (metric, day)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS events (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     ts      INTEGER NOT NULL,
@@ -77,6 +81,25 @@ class HistoryStore:
         if rows:
             with self._lock:
                 self._conn.executemany("INSERT OR REPLACE INTO daily_energy(day, metric, value) VALUES (?,?,?)", rows)
+
+    def get_kv(self, key: str, default: str | None = None) -> str | None:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_kv(self, key: str, value: str) -> None:
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO kv(key, value) VALUES (?,?)", (key, value))
+
+    def daily_sum(self, metric: str) -> float:
+        with self._lock:
+            row = self._conn.execute("SELECT COALESCE(SUM(value),0) FROM daily_energy WHERE metric=?", (metric,)).fetchone()
+        return float(row[0] or 0.0)
+
+    def daily_series(self, metric: str, days: int = 60) -> list[tuple[str, float]]:
+        with self._lock:
+            cur = self._conn.execute("SELECT day, value FROM daily_energy WHERE metric=? ORDER BY day DESC LIMIT ?", (metric, days))
+            return [(d, float(v)) for d, v in cur.fetchall()][::-1]
 
     def add_event(self, level: str, source: str, message: str, ts: int | None = None) -> None:
         with self._lock:

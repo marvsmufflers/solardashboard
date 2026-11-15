@@ -4,16 +4,18 @@ A self-hosted replacement for Solar Assistant for one specific **off-grid cabin*
 connection, so nothing in solardash is modelled as "grid": the 6000XP's AC input is a generator input.
 
 Generators: three Honda EU3000is. One is modified for remote start and lives in the outhouse (the
-auto-start path), one is plugged in on the porch during winter stays when it runs for long stretches.
-solardash tracks the two *paths* a generator can feed independently, with names from the config:
+auto-start unit), one is plugged in on the porch during winter stays when it runs for long stretches.
+**Both feed the Chargeverter** through a cam switch in the cabin that selects one or the other; nothing
+is connected to the inverter's own AC input.
 
-* **inverter AC input** (`inverter.ac_input_name`) – detected from AC-input voltage > 80 V; power is
-  rectifier (battery charging) + pass-through to loads;
-* **Chargeverter** (`chargeverter.generator_name`) – detected from the inferred Chargeverter DC output.
+solardash therefore has one generator *path* (the Chargeverter) and a list of generators
+(`generators:` in the config). The cam-switch position cannot be read, so it is a setting in the UI
+(`PUT /api/generators/active`, remembered in SQLite). Chargeverter output above the noise threshold
+means "generator running", and run time accrues to the selected generator: per-day hours in the
+`daily_energy` table (`generator_runtime_h/<name>`), lifetime totals on `/api/generators`, start/stop
+and cam-switch events in the event log. Handy for EU3000is oil-change intervals.
 
-For each path solardash records run hours per day (`daily_energy` table, keys
-`generator_*_runtime_h`), logs start/stop events, and shows today's hours on the Overview tab – handy
-for EU3000is oil-change intervals.
+If the inverter's AC input ever shows voltage, the dashboard flags it as unexpected.
 
 Devices:
 
@@ -47,10 +49,10 @@ The existing site (Docker on a Synology DS225+) uses:
   * 32-bit energy counters are low-word first;
   * reg 77 bit 0 says whether the AC input is configured as **generator**;
   * regs 12/15/27 (vendor names "grid voltage/frequency/power to user") are exposed as
-    `ac_input_voltage`, `ac_input_frequency`, `ac_input_power` (generator pass-through to loads);
+    `ac_input_voltage`, `ac_input_frequency`, `ac_input_power` and kept only as diagnostics, since
+    nothing is connected to that input here;
   * reg 123 ("generator power") and 124–126 are not real measurements on the XP firmware – not used;
-    `generator_power = rectifier_power + ac_input_power` and generator energy is the sum of the
-    rectifier and pass-through counters;
+    generator power in solardash is the inferred Chargeverter output;
   * settings that only mean something with a utility connection (export, on-grid working mode,
     on-grid end-of-discharge) are not exposed; "AC charge" settings are kept because they govern
     charging from the generator on the AC input;

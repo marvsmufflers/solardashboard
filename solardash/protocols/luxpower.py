@@ -292,17 +292,16 @@ def decode_inputs(regs: dict[int, int]) -> dict:
         out["faults"] = decode_bitfield(out["fault_code"], FAULT_CODES)
     if "warning_code" in out:
         out["warnings"] = decode_bitfield(out["warning_code"], WARNING_CODES)
-    # Off-grid system: the AC input *is* the generator. Reg 123/124/125 are not
-    # trustworthy on the XP family, so generator power/energy is what the
-    # inverter actually takes from the AC input: battery charging through the
-    # rectifier plus load pass-through.
+    # Total power drawn from the inverter's AC input (battery charging through
+    # the rectifier plus pass-through to loads). Regs 123-126 are not real
+    # measurements on the XP family, so they are not used for this.
     if "rectifier_power" in out or "ac_input_power" in out:
-        out["generator_power"] = out.get("rectifier_power", 0) + out.get("ac_input_power", 0)
+        out["ac_input_total_power"] = out.get("rectifier_power", 0) + out.get("ac_input_power", 0)
     if "rectifier_energy_today" in out or "ac_input_energy_today" in out:
-        out["generator_energy_today"] = round(out.get("rectifier_energy_today", 0) + out.get("ac_input_energy_today", 0), 1)
+        out["ac_input_total_energy_today"] = round(out.get("rectifier_energy_today", 0) + out.get("ac_input_energy_today", 0), 1)
     if "rectifier_energy_total" in out or "ac_input_energy_total" in out:
-        out["generator_energy_total"] = round(out.get("rectifier_energy_total", 0) + out.get("ac_input_energy_total", 0), 1)
-    out["generator_running"] = out.get("ac_input_voltage", 0) > 80
+        out["ac_input_total_energy_total"] = round(out.get("rectifier_energy_total", 0) + out.get("ac_input_energy_total", 0), 1)
+    out["ac_input_live"] = out.get("ac_input_voltage", 0) > 80
     return out
 
 

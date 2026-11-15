@@ -38,8 +38,7 @@ class SimWorld:
         self.soc = [0.62, 0.60, 0.64][:packs] + [0.6] * max(0, packs - 3)
         self.capacity_ah = 100.0
         self.load_w = 600.0
-        self.gen_on = False  # Chargeverter generator
-        self.inv_gen_on = False  # generator on the inverter AC input
+        self.gen_on = False  # generator feeding the Chargeverter
         self.cv_told_soc: int | None = None
         self.holding: dict[int, int] = self._default_holding()
         self._last = time.time()
@@ -67,13 +66,7 @@ class SimWorld:
         self.load_w = max(150.0, min(5500.0, self.load_w + self.rng.gauss(0, 60)))
         pv = self.pv_w()
         v = self.pack_voltage()
-        avg_soc = sum(self.soc) / self.packs
-        if avg_soc < 0.35:
-            self.inv_gen_on = True
-        elif avg_soc > 0.80:
-            self.inv_gen_on = False
-        self._inv_gen_charge_w = 2500.0 if self.inv_gen_on else 0.0
-        inv_batt_w = pv * 0.96 - self.load_w / 0.93 + self._inv_gen_charge_w  # + charging
+        inv_batt_w = pv * 0.96 - self.load_w / 0.93  # + charging
         cv_w = 4200.0 if self.gen_on else 0.0
         bank_w = inv_batt_w + cv_w
         bank_ah = bank_w / v * dt / 3600.0
@@ -90,8 +83,7 @@ class SimWorld:
             if self.cv_told_soc <= 50:
                 self.gen_on = True
             elif self.cv_told_soc >= 90:
-                self.gen_on = False  # Chargeverter generator
-        self.inv_gen_on = False  # generator on the inverter AC input
+                self.gen_on = False  # generator feeding the Chargeverter
 
     def pack_voltage(self, i: int | None = None) -> float:
         soc = sum(self.soc) / self.packs if i is None else self.soc[i]
@@ -149,12 +141,6 @@ class SimWorld:
         r[8] = int(round(pv * 0.45))
         r[10] = int(max(0.0, inv_w))
         r[11] = int(max(0.0, -inv_w))
-        if self.inv_gen_on:
-            r[12], r[15] = 2398, 5998
-            r[17] = int(self._inv_gen_charge_w)
-            r[27] = int(self.load_w)
-            r[32] = int(self.hour_of_day() * 0.4 * 10)
-            r[37] = int(self.hour_of_day() * 0.6 * 10)
         r[16] = int(self.load_w / 0.93)
         r[20] = 2401
         r[23] = 6001
