@@ -127,6 +127,20 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         except KeyError as e:
             raise HTTPException(404, str(e))
 
+    @app.get("/api/weather")
+    async def api_weather():
+        return svc.state.weather or {"enabled": False}
+
+    @app.get("/api/forecast")
+    async def api_forecast():
+        return svc.state.forecast or {"available": False, "reason": "forecast task not running"}
+
+    @app.post("/api/forecast/recompute")
+    async def api_forecast_recompute():
+        if svc.forecast is None:
+            raise HTTPException(503, "forecast task not running")
+        return await asyncio.to_thread(svc.forecast.recompute)
+
     @app.get("/api/history/metrics")
     async def api_history_metrics():
         return svc.store.metrics()

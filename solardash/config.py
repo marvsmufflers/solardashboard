@@ -49,8 +49,8 @@ class ChargeverterEmulateConfig:
 
 @dataclass
 class ChargeverterConfig:
-    enabled: bool = False
-    mode: str = "sniff"  # sniff | emulate | off
+    enabled: bool = False  # RS485 link to the Chargeverter's BMS port is optional and normally not needed
+    mode: str = "off"  # off | sniff | emulate
     port: str = "/dev/ttyACM3"
     baud: int = 9600
     parity: str = "N"
@@ -74,6 +74,36 @@ class GeneratorConfig:
     contactor_topic: str = ""
     # a signal older than this is ignored (falls back to inference)
     signal_stale_s: float = 6 * 3600
+
+
+@dataclass
+class WeatherConfig:
+    enabled: bool = False
+    provider: str = "wunderground"
+    api_key: str = ""  # or SOLARDASH_WU_API_KEY
+    station_id: str = ""
+    latitude: float | None = None  # defaults to the station's reported position
+    longitude: float | None = None
+    units: str = "e"  # 'e' imperial (US stations) or 'm'
+    poll_interval: float = 300.0
+    forecast_interval: float = 1800.0
+
+
+@dataclass
+class PlannerConfig:
+    enabled: bool = True
+    soc_floor: float = 30.0  # never plan to go below this
+    soc_target: float = 90.0  # stop charging here (end of the LFP constant-current region)
+    soc_margin: float = 5.0  # planning margin above the floor
+    generator_dc_kw: float = 2.4  # Chargeverter DC output from one EU3000is (~2.8 kW AC)
+    charge_efficiency: float = 0.94
+    min_run_h: float = 1.0
+    max_run_h: float = 8.0
+    quiet_hours: list[str] = field(default_factory=list)  # e.g. ["22:00-07:00"]
+    horizon_h: int = 72
+    pv_kw_peak: float = 6.0  # array size; used until enough history has been learned
+    battery_kwh: float | None = None  # default: bank Ah × 51.2 V
+    recompute_interval: float = 300.0
 
 
 @dataclass
@@ -117,6 +147,8 @@ class Config:
                         contactor_topic="solardash/generator/outhouse/contactor"),
         GeneratorConfig("Porch generator", "Honda EU3000is, plugged in during winter stays"),
     ])
+    weather: WeatherConfig = field(default_factory=WeatherConfig)
+    planner: PlannerConfig = field(default_factory=PlannerConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     web: WebConfig = field(default_factory=WebConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
@@ -151,6 +183,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         batteries=[_build(BatteryConfig, b) for b in raw.get("batteries", [])],
         chargeverter=_build(ChargeverterConfig, raw.get("chargeverter")),
         generators=[_build(GeneratorConfig, g) for g in raw["generators"]] if "generators" in raw else Config.__dataclass_fields__["generators"].default_factory(),  # type: ignore[misc]
+        weather=_build(WeatherConfig, raw.get("weather")),
+        planner=_build(PlannerConfig, raw.get("planner")),
         history=_build(HistoryConfig, raw.get("history")),
         web=_build(WebConfig, raw.get("web")),
         mqtt=_build(MqttConfig, raw.get("mqtt")),
@@ -162,6 +196,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         cfg.web.port = int(os.environ["SOLARDASH_PORT"])
     if os.environ.get("SOLARDASH_DB"):
         cfg.history.path = os.environ["SOLARDASH_DB"]
+    if os.environ.get("SOLARDASH_WU_API_KEY"):
+        cfg.weather.api_key = os.environ["SOLARDASH_WU_API_KEY"]
     if os.environ.get("SOLARDASH_LOG_LEVEL"):
         cfg.log_level = os.environ["SOLARDASH_LOG_LEVEL"]
     if cfg.simulate and not cfg.batteries:

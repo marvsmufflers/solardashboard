@@ -122,7 +122,9 @@ class MqttPublisher:
         write_setting: Callable[[str, Any], Any] | None = None,
         signal_topics: dict[str, tuple[str, str]] | None = None,
         on_signal: Callable[[str, bool | None, bool | None], Any] | None = None,
+        extra_values: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
+        self.extra_values = extra_values
         self.cfg = cfg
         self.state = state
         self.write_setting = write_setting
@@ -281,6 +283,21 @@ class MqttPublisher:
                     if key == "runtime_today_h":
                         self._discover(f"generator_{i}", g["name"], "runtime_today_h", topic)
                     self._pub(topic, g[key])
+        w = (self.state.weather or {}).get("current") or {}
+        for key, val in w.items():
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and key not in ("ts",):
+                topic = f"{p}/weather/{key}/state"
+                self._discover("weather", "Weather station", key, topic)
+                self._pub(topic, val)
+        if self.extra_values is not None:
+            try:
+                for key, val in self.extra_values().items():
+                    topic = f"{p}/{key}/state"
+                    if isinstance(val, (int, float)) and not isinstance(val, bool):
+                        self._discover(key.split("/")[0], key.split("/")[0].capitalize(), key.split("/")[1], topic)
+                    self._pub(topic, val)
+            except Exception as e:  # noqa: BLE001
+                log.debug("mqtt: extra values failed: %s", e)
         cvd = self.state.chargeverter
         if cvd:
             for key in ("charger_online", "battery_answering", "poll_count", "mode", "presented_soc", "answered"):

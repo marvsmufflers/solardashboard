@@ -21,6 +21,10 @@ def cfg(tmp_path):
     c.chargeverter.mode = "emulate"
     c.history.path = str(tmp_path / "t.db")
     c.history.sample_interval = 0.3
+    c.weather.enabled = True
+    c.weather.api_key = "sim"
+    c.weather.station_id = "KSIM0001"
+    c.weather.poll_interval = 0.5
     return c
 
 
@@ -103,6 +107,16 @@ async def test_full_stack(cfg):
             assert summary["generators"][0]["signal_topics"]["running"].startswith("solardash/generator/")
             r = await c.put("/api/generators/Nope/signal", json={"running": True})
             assert r.status_code == 404
+            # weather + forecast + plan through the simulated station
+            assert await _wait_for(lambda: (svc.state.weather.get("current") or {}).get("station_id") == "KSIM0001" and svc.state.weather.get("forecast"), timeout=6)
+            r = await c.post("/api/forecast/recompute")
+            assert r.status_code == 200, r.text
+            f = r.json()
+            assert f["available"] and len(f["hours"]) >= 72 and f["days"] and f["weather_days"] == 5
+            assert f["model"]["k_clear_source"] == "configured"
+            assert f["plan"] is not None and "reason" in f["plan"]
+            r = await c.get("/api/weather")
+            assert r.json()["current"]["solar_radiation"] is not None
             r = await c.get("/")
             assert r.status_code == 200 and b"solardash" in r.content
             r = await c.get("/healthz")

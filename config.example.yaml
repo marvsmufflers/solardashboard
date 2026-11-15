@@ -30,9 +30,14 @@ batteries:               # one entry per RS485 link (Solar Assistant "USB JBD RS
     capacity_ah: 100
 
 chargeverter:
+  # The Chargeverter is a dumb AC->DC charger here: Home Assistant starts the
+  # generator and closes the contactor, and solardash infers its output from
+  # BMS pack power minus inverter battery power. No wiring to it is needed.
+  # An RS485 link to its BMS RJ45 (pin 1 = B, pin 2 = A) is optional: "sniff"
+  # shows its SOC polls, "emulate" answers them so its display shows a real SOC.
   enabled: false
-  mode: sniff            # sniff = listen only | emulate = answer the Chargeverter as the battery | off
-  port: /dev/ttyUSB0     # RS485 adapter wired to the Chargeverter BMS RJ45: pin 1 = B, pin 2 = A
+  mode: off              # off | sniff | emulate
+  port: /dev/ttyUSB0
   baud: 9600
   parity: N
   power_threshold_w: 150 # derived Chargeverter output below this is reported as 0
@@ -57,6 +62,32 @@ generators:
     signal_stale_s: 21600
   - name: Porch generator
     notes: Honda EU3000is, plugged in during winter stays (no sense wire; inferred from Chargeverter output)
+
+weather:
+  enabled: false
+  provider: wunderground
+  api_key: ""            # PWS owner key from wunderground.com/member/api-keys (or env SOLARDASH_WU_API_KEY)
+  station_id: KXXXXXXX   # your station; its solar radiation sensor (if any) calibrates the PV model
+  latitude: null         # defaults to the station's position
+  longitude: null
+  units: e
+  poll_interval: 300
+  forecast_interval: 1800
+
+planner:
+  enabled: true
+  soc_floor: 30          # never plan to go below
+  soc_target: 90         # stop here: above it LFP leaves constant-current and the generator idles
+  soc_margin: 5
+  generator_dc_kw: 2.4   # what the Chargeverter delivers from one EU3000is
+  charge_efficiency: 0.94
+  min_run_h: 1.0
+  max_run_h: 8.0
+  quiet_hours: []        # e.g. ["22:00-07:00"] if the outhouse generator must not run at night
+  horizon_h: 72
+  pv_kw_peak: 6.0        # array size, used until the model has learned from history
+  battery_kwh: null      # default: bank Ah x 51.2 V
+  recompute_interval: 300
 
 history:
   path: data/solardash.db

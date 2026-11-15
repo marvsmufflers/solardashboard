@@ -11,8 +11,14 @@ Chargeverter.
   the UI, and solardash logs start/stop events and run hours per generator (per day and lifetime)
 * Reads the inverter over Modbus RTU (RS485) and each battery over the JBD protocol – no cloud
 * Inverter settings read/write with range checks and confirmation for risky ones (opt-in)
-* Chargeverter support: listen to its battery bus, infer its output power, and optionally answer its
-  polls with real pack data so it stops showing *LOST* and can start/stop the generator on SOC
+* Chargeverter output inferred from BMS pack power minus inverter battery power (no wiring to it
+  needed; an optional RS485 link can sniff or answer its battery polls)
+* Weather Underground integration for the cabin's own station: current conditions including solar
+  radiation, 5-day forecast with cloud cover
+* PV forecast model that learns the array's clear-sky capacity from history and self-corrects against
+  what the forecast predicted; load profile by hour of day
+* Generator planner: simulates SOC 72 h ahead and recommends when to start the outhouse generator and
+  how long to run it, exposed on the API and MQTT for Home Assistant to act on
 * SQLite history with hourly rollups; MQTT output using Solar Assistant's topic names plus
   Home Assistant discovery
 * Simulation mode and a serial probe tool, so you can try everything before touching hardware
@@ -68,13 +74,33 @@ exactly like wrong wiring.
 Everything is in `config.yaml` (see `config.example.yaml`). Environment overrides:
 `SOLARDASH_CONFIG`, `SOLARDASH_PORT`, `SOLARDASH_DB`, `SOLARDASH_LOG_LEVEL`, `SOLARDASH_SIMULATE`.
 
-### Chargeverter modes
+### Chargeverter
 
-* `off` – not connected.
-* `sniff` – read-only. Shows whether the charger is polling and what SOC is on the bus.
-* `emulate` – solardash answers the Chargeverter's battery polls with the aggregated JBD data.
-  It stops answering when battery data is older than `emulate.stale_after` seconds, so a failure
-  degrades to the charger's normal *LOST* behaviour. Use a dedicated RS485 adapter for this bus.
+The Chargeverter is a dumb AC-to-DC charger in this system: Home Assistant starts the generator and
+closes the contactor, so the charger's own start logic and SOC port are unused and nothing needs to be
+wired to it. solardash infers its DC output as pack power (BMS) minus inverter battery power.
+An RS485 link to its BMS RJ45 is optional (`chargeverter.mode`): `sniff` shows its SOC polls,
+`emulate` answers them with real pack data so its display shows a SOC instead of *LOST*.
+
+### Weather and generator planning
+
+1. Get a PWS owner API key at wunderground.com/member/api-keys and set `weather.api_key` (or the
+   `SOLARDASH_WU_API_KEY` environment variable) and `weather.station_id`. `solardash probe weather`
+   prints what the API returns for your station.
+2. The model starts from `planner.pv_kw_peak` (array size) and after a few days of history learns the
+   array's real clear-sky capacity, how it responds to the station's measured irradiance, and a bias
+   factor from forecast-vs-actual. The load profile comes from the last two weeks by hour of day.
+3. The planner simulates SOC for `planner.horizon_h` hours using the forecast cloud cover and
+   recommends one generator run: as late as possible so solar is used first and the Chargeverter runs
+   at full current from a low SOC (best fuel efficiency on an EU3000is), sized to carry the bank to the
+   next solar surplus, capped at `soc_target`, respecting `quiet_hours`. If one run cannot cover a long
+   cloudy stretch it says when the next will be needed. While the generator runs it advises when to stop.
+
+The plan is published on MQTT as `solar_assistant/plan/recommended_now`, `plan/stop_recommended`,
+`plan/start_at`, `plan/end_at`, `plan/run_h`, `plan/end_soc`, `plan/reason` and the forecast as
+`forecast/pv_today_kwh`, `forecast/pv_tomorrow_kwh`. A Home Assistant automation can start the
+outhouse generator when `recommended_now` turns on (then do its 90 s warm-up and close the contactor)
+and stop it when `stop_recommended` turns on. solardash itself never switches anything.
 
 ## Home Assistant and the auto-start generator
 
@@ -134,6 +160,8 @@ Chargeverter output while it is selected on the cam switch in the UI.
 | `POST /api/settings/refresh` | re-read holding registers |
 | `GET /api/generators` / `PUT /api/generators/active` `{"name": …}` | generator run hours, cam-switch selection |
 | `PUT /api/generators/{name}/signal` `{"running": true, "contactor": false}` | external run/contactor signal (Home Assistant) |
+| `GET /api/weather` | station observation and 5-day forecast |
+| `GET /api/forecast` / `POST /api/forecast/recompute` | PV/load prediction, model, generator plan |
 | `GET /api/devices`, `GET /api/events`, `GET /api/chargeverter`, `GET /api/inverter/raw` | diagnostics |
 | `WS /ws` | pushes the snapshot about once a second |
 

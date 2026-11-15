@@ -92,6 +92,12 @@ Enable 120 Ω termination on the adapter if it has a switch.
 
 ## 3. Chargeverter GC
 
+In this system the Chargeverter is just an AC→DC charger: Home Assistant starts the generator (12 V
+run-sense feedback) and closes the contactor after warm-up, so the charger's own generator-start
+relay and SOC-reading port are unused. solardash needs no connection to it; its output is inferred
+(see "Output power" below). The RS485 sniff/emulate support that follows is optional and off by
+default.
+
 There is no register to read *from* the Chargeverter. It is a Modbus **master**: every ~500 ms it
 sends `01 03 00 13 00 11 74 03` (read 17 holding registers from unit 1 starting at 0x13) to whatever
 is on its BMS RJ45 (pin 1 = RS485-B, pin 2 = RS485-A, 9600 8N1) and uses the SOC in the reply to
@@ -129,6 +135,27 @@ solardash therefore offers two modes on a dedicated RS485 adapter wired to that 
   `chargeverter_power = Σ(pack V·I) − (inverter charge − discharge)`. Below `power_threshold_w`
   (default 150 W) it is reported as 0 to hide sensor noise. A Shelly/CT on the Chargeverter's AC
   input would be the measured alternative.
+
+## 4. Weather, PV forecast and generator planning
+
+* **Weather Underground** (`weather/wunderground.py`): the cabin's PWS gives current conditions every
+  5 min (including `solarRadiation` W/m² when the station has a pyranometer) and a 5-day forecast with
+  day/night cloud cover. Field names follow TWC's schemas; `solardash probe weather` dumps raw
+  responses to verify against a real account (api.weather.com was not reachable from the development
+  environment).
+* **Clear-sky model** (`weather/solar.py`): NOAA solar position + Haurwitz GHI, hourly averages.
+* **PV model** (`forecast/model.py`): `pv = k_clear × GHI_clear × (1 − 0.75·cloud^3.4) × bias`.
+  `k_clear` is the 90th percentile of pv/GHI_clear over 30 days of daylight hours (what the array does
+  when it is clear), clamped around the configured array size; `bias` is actual/predicted over the
+  last 7 days using the predictions logged at forecast time (`forecast/pv_power_pred`); `k_meas`
+  (per measured W/m²) gives an "expected now" so under-performance (snow, shading) is visible.
+  Load profile: median load by local hour over 14 days.
+* **Planner** (`forecast/planner.py`): 15-minute SOC simulation over 72 h; if SOC would cross
+  floor + margin, searches start times from the crossing backwards (latest feasible wins), sizes the
+  run to the drawdown that follows it (capped at `soc_target`, min run length), rejects starts whose
+  run touches quiet hours, flags when a further run will be needed, and while a generator is running
+  advises the stop SOC. Output is advisory: `plan/recommended_now`, `plan/stop_recommended`, times
+  and reason on the API and MQTT.
 
 ## Architecture
 

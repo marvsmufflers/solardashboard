@@ -12,6 +12,7 @@ from ..config import Config
 from ..devices.battery import BatteryPoller
 from ..devices.chargeverter import ChargeverterTask
 from ..devices.inverter import InverterPoller
+from ..forecast.service import ForecastTask, WeatherTask, plan_mqtt_values
 from ..mqtt.publisher import MqttPublisher
 from ..storage.sqlite import HistoryStore
 from .derived import compute_totals
@@ -54,6 +55,8 @@ class Service:
         self.inverter: InverterPoller | None = None
         self.batteries: list[BatteryPoller] = []
         self.chargeverter: ChargeverterTask | None = None
+        self.weather: WeatherTask | None = None
+        self.forecast: ForecastTask | None = None
         self.mqtt: MqttPublisher | None = None
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
@@ -92,6 +95,14 @@ class Service:
         if cfg.chargeverter.enabled and cfg.chargeverter.mode in ("sniff", "emulate"):
             link = SimulatedChargeverterLink(world, with_battery=(cfg.chargeverter.mode == "sniff")) if world else None
             self.chargeverter = ChargeverterTask(cfg.chargeverter, self.state, link=link)
+        if cfg.weather.enabled:
+            fetch = None
+            if world is not None:
+                from ..devices.simulated import SimulatedWeatherFetch
+
+                fetch = SimulatedWeatherFetch(world)
+            self.weather = WeatherTask(cfg, self.state, self.store, fetch=fetch)
+        self.forecast = ForecastTask(cfg, self.state, self.store, self.weather)
         if cfg.mqtt.enabled:
             topics: dict[str, tuple[str, str]] = {}
             for g in cfg.generators:
@@ -100,7 +111,8 @@ class Service:
                 if g.contactor_topic:
                     topics[g.contactor_topic] = (g.name, "contactor")
             self.mqtt = MqttPublisher(cfg.mqtt, self.state, write_setting=self.write_setting_blocking,
-                                      signal_topics=topics, on_signal=self.set_generator_signal)
+                                      signal_topics=topics, on_signal=self.set_generator_signal,
+                                      extra_values=lambda: plan_mqtt_values(self.state.forecast))
 
     # -- lifecycle -----------------------------------------------------------------
     async def start(self) -> None:
@@ -110,6 +122,10 @@ class Service:
             self._tasks.append(asyncio.create_task(b.run(), name=f"battery{b.index}"))
         if self.chargeverter:
             self._tasks.append(asyncio.create_task(self.chargeverter.run(), name="chargeverter"))
+        if self.weather:
+            self._tasks.append(asyncio.create_task(self.weather.run(), name="weather"))
+        if self.forecast:
+            self._tasks.append(asyncio.create_task(self.forecast.run(), name="forecast"))
         if self.mqtt:
             self._tasks.append(asyncio.create_task(self.mqtt.run(), name="mqtt"))
         self._tasks.append(asyncio.create_task(self._derive_loop(), name="derive"))
@@ -124,6 +140,10 @@ class Service:
             b.stop()
         if self.chargeverter:
             self.chargeverter.stop()
+        if self.weather:
+            self.weather.stop()
+        if self.forecast:
+            self.forecast.stop()
         if self.mqtt:
             self.mqtt.stop()
         for t in self._tasks:

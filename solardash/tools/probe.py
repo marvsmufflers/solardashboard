@@ -22,7 +22,7 @@ from ..protocols.modbus_rtu import ModbusError, ModbusRtuClient, RtuFrameSplitte
 
 
 def add_probe_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("what", choices=["list", "inverter", "battery", "sniff", "raw", "all"])
+    p.add_argument("what", choices=["list", "inverter", "battery", "sniff", "raw", "all", "weather"])
     p.add_argument("--port")
     p.add_argument("--baud", type=int, default=None)
     p.add_argument("--bauds", default="19200,9600")
@@ -136,6 +136,26 @@ def raw_dump(port: str, baud: int, seconds: float) -> None:
 def run_probe(args: argparse.Namespace) -> int:
     bauds = [int(b) for b in args.bauds.split(",") if b]
     units = [int(u) for u in args.units.split(",") if u != ""]
+    if args.what == "weather":
+        import json
+
+        from ..config import load_config
+        from ..weather.wunderground import WundergroundClient
+
+        cfg = load_config(getattr(args, "config", None))
+        w = cfg.weather
+        if not w.api_key or not w.station_id:
+            print("set weather.api_key and weather.station_id in config.yaml (or SOLARDASH_WU_API_KEY)", file=sys.stderr)
+            return 2
+        c = WundergroundClient(w.api_key, w.station_id, units=w.units)
+        obs = c.current()
+        print("current:", json.dumps(obs.to_dict(), indent=1, default=str))
+        print("raw observation keys:", sorted(obs.raw.keys()))
+        lat, lon = (w.latitude, w.longitude) if w.latitude is not None else (obs.lat, obs.lon)
+        days = c.forecast(lat, lon)
+        for d in days:
+            print(f"{d.date}: {d.narrative}  day cloud {None if d.day is None else d.day.cloud_cover}  night cloud {None if d.night is None else d.night.cloud_cover}  qpf {d.qpf_mm} mm")
+        return 0
     if args.what == "list":
         ports = list_ports()
         if not ports:

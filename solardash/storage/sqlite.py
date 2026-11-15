@@ -147,27 +147,37 @@ class HistoryStore:
         """
         start, end = int(start), int(end)
         raw_floor = int(time.time() - self.retention_days * 86400) if self.retention_days > 0 else 0
+        rows: list[tuple[int, float]] = []
         with self._lock:
-            if start >= raw_floor:
+            if start < raw_floor:
+                cur = self._conn.execute(
+                    "SELECT ts, avg FROM hourly WHERE metric=? AND ts BETWEEN ? AND ? ORDER BY ts",
+                    (metric, start, min(end, raw_floor - 1)),
+                )
+                rows.extend((int(t), float(v)) for t, v in cur.fetchall() if v is not None)
+            raw_start = max(start, raw_floor)
+            if raw_start <= end:
                 if step and step > 1:
                     cur = self._conn.execute(
                         "SELECT (ts/?)*?, AVG(value) FROM samples WHERE metric=? AND ts BETWEEN ? AND ? "
                         "GROUP BY ts/? ORDER BY 1",
-                        (step, step, metric, start, end, step),
+                        (step, step, metric, raw_start, end, step),
                     )
                 else:
                     cur = self._conn.execute(
                         "SELECT ts, value FROM samples WHERE metric=? AND ts BETWEEN ? AND ? ORDER BY ts",
-                        (metric, start, end),
+                        (metric, raw_start, end),
                     )
-                rows = [(int(t), float(v)) for t, v in cur.fetchall() if v is not None]
-                if rows:
-                    return rows
-            cur = self._conn.execute(
-                "SELECT ts, avg FROM hourly WHERE metric=? AND ts BETWEEN ? AND ? ORDER BY ts",
-                (metric, start, end),
-            )
-            return [(int(t), float(v)) for t, v in cur.fetchall() if v is not None]
+                raw_rows = [(int(t), float(v)) for t, v in cur.fetchall() if v is not None]
+                if not raw_rows and not rows:
+                    # raw retention may not have been pruned yet; fall back to whatever hourly has
+                    cur = self._conn.execute(
+                        "SELECT ts, avg FROM hourly WHERE metric=? AND ts BETWEEN ? AND ? ORDER BY ts",
+                        (metric, raw_start, end),
+                    )
+                    raw_rows = [(int(t), float(v)) for t, v in cur.fetchall() if v is not None]
+                rows.extend(raw_rows)
+        return rows
 
     def query_many(self, metrics: list[str], start: float, end: float, step: int | None = None) -> dict[str, list]:
         return {m: self.query(m, start, end, step) for m in metrics}

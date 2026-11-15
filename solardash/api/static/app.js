@@ -16,6 +16,7 @@
     if (b.dataset.tab === "system") loadSystem();
     if (b.dataset.tab === "batteries") loadBattChart();
     if (b.dataset.tab === "chargeverter") loadCvChart();
+    if (b.dataset.tab === "forecast") loadForecast();
     try { localStorage.setItem("tab", b.dataset.tab); } catch (e) {}
   }));
   try { const t = localStorage.getItem("tab"); if (t) document.querySelector(`nav button[data-tab="${t}"]`)?.click(); } catch (e) {}
@@ -58,6 +59,8 @@
     const parts = [];
     runningGens.forEach((g) => parts.push(`${g.name} (${g.source === "signal" ? "sense wire" : "inferred"}${g.contactor === true ? ", contactor closed" : g.contactor === false ? ", contactor open" : ""})`));
     if (!runningGens.length) parts.push(`${tot.generator_active || ""} selected · ${(tot.generator_runtime_today_h ?? 0).toFixed(1)} h today`);
+    const fp = state.forecast_summary?.plan;
+    if (fp) parts.push(fp.stop_recommended ? "plan: stop now" : fp.recommended_now ? "plan: START NOW" : fp.needed ? `plan: start ${fmtDT(fp.start_at)} for ${fp.run_h.toFixed(1)} h` : `plan: no run needed (min ${fp.min_soc_without}%)`);
     (tot.generator_warnings || []).forEach((w) => parts.push("⚠ " + w));
     $("#t-gen-sub").textContent = parts.join(" · ");
     renderGenSelect(tot);
@@ -70,7 +73,8 @@
     ]);
     kv($("#gen-hours"), (tot.generators || []).map((g) => [g.name + (g.active ? " (selected)" : ""),
       `${g.runtime_today_h.toFixed(2)} h today${genTotals[g.name] != null ? ` · ${genTotals[g.name].toFixed(1)} h total` : ""} · ${g.running ? (g.warming_up ? "warming up" : "running") : "off"} (${g.source === "signal" ? "sense wire" : "inferred"})`]));
-    renderBatteries(); renderInverter(); renderCv();
+    renderBatteries(); renderInverter(); renderCv(); renderWeather();
+    document.querySelector(".tile.cv").style.display = cv.mode ? "" : "none";
     if (document.querySelector('nav button[data-tab="system"]').classList.contains("active")) renderDevices();
   }
 
@@ -230,6 +234,71 @@
       { label: "Battery power (inverter)", data: cols[3], borderColor: palette.load },
     ], "W");
   }
+
+  // ---- forecast -------------------------------------------------------------------
+  const fmtDT = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  function renderWeather() {
+    const w = state?.weather || {}, c = w.current;
+    if (!c) { kv($("#weather-now"), [["Status", w.error || (w.station_id ? "waiting for data" : "not configured (weather.enabled: false)")]]); return; }
+    kv($("#weather-now"), [
+      ["Station", `${c.station_id} · ${ago(c.age_s)}`], ["Temperature", fmt(c.temperature_c, 1, "°C")], ["Humidity", fmt(c.humidity, 0, "%")],
+      ["Solar radiation", c.solar_radiation != null ? fmt(c.solar_radiation, 0, "W/m²") : "no sensor"], ["UV", c.uv], ["Wind", `${fmt(c.wind_kph, 0, "km/h")} gust ${fmt(c.wind_gust_kph, 0)}`],
+      ["Pressure", fmt(c.pressure_hpa, 1, "hPa")], ["Rain rate", fmt(c.precip_rate_mm_h, 1, "mm/h")], ["Rain today", fmt(c.precip_total_mm, 1, "mm")],
+      ["Forecast", w.forecast?.length ? `${w.forecast.length} days, updated ${ago((Date.now() / 1000) - w.forecast_updated)}` : "none yet"],
+    ]);
+  }
+  async function loadForecast() {
+    const f = await (await fetch("/api/forecast")).json();
+    const plan = f.plan;
+    const badge = $("#plan-badge");
+    if (!f.available) { $("#plan-reason").textContent = f.reason || "unavailable"; badge.textContent = "unavailable"; badge.className = "pill"; return; }
+    if (!plan) { badge.textContent = "planner off"; badge.className = "pill"; $("#plan-reason").textContent = "Planner disabled or no SOC yet."; }
+    else {
+      badge.textContent = plan.stop_recommended ? "stop generator" : plan.recommended_now ? "start generator now" : plan.needed ? "run scheduled" : "no run needed";
+      badge.className = "pill " + (plan.recommended_now || plan.stop_recommended ? "warn" : plan.needed ? "" : "ok");
+      $("#plan-reason").textContent = plan.reason;
+      kv($("#plan-kv"), [
+        ["Start", plan.start_at ? fmtDT(plan.start_at) : "–"], ["Stop", plan.end_at ? fmtDT(plan.end_at) : "–"], ["Run length", plan.needed ? fmt(plan.run_h, 1, "h") : "–"],
+        ["SOC start → end", plan.needed ? `${plan.start_soc ?? f.soc_now} → ${plan.end_soc} %` : "–"], ["Energy from generator", plan.needed ? fmt(plan.energy_kwh, 1, "kWh") : "–"],
+        ["Lowest SOC without generator", `${plan.min_soc_without} % at ${plan.min_soc_at ? fmtDT(plan.min_soc_at) : "–"}`], ["Next run after this", plan.next_deficit_at ? fmtDT(plan.next_deficit_at) : "none in horizon"],
+        ["Battery used for planning", fmt(f.params.battery_kwh, 1, "kWh")], ["Floor / target", `${f.params.soc_floor} % / ${f.params.soc_target} %`],
+      ]);
+    }
+    const m = f.model;
+    kv($("#pv-model"), [
+      ["Clear-sky capacity", `${m.k_clear} kW per kW/m² (${m.k_clear_source}, ${m.samples_clear} h)`], ["Forecast bias correction", `×${m.bias} (${m.samples_bias} h)`],
+      ["Per measured W/m²", m.k_meas != null ? `${(m.k_meas * 1000).toFixed(2)} W per W/m² (${m.samples_meas} h)` : "no pyranometer data yet"],
+      ["Expected now from irradiance", f.expected_now_kw != null ? `${f.expected_now_kw.toFixed(2)} kW vs actual ${f.actual_now_kw?.toFixed(2)} kW` : "–"],
+      ["Load profile", `${m.load_profile_source}, ${m.load_days} days, avg ${(m.load_profile_kw.reduce((a, b) => a + b, 0) / 24).toFixed(2)} kW`], ["Weather days in forecast", f.weather_days],
+      ["Model refreshed", ago((Date.now() / 1000) - m.fitted_at)],
+    ]);
+    $("#forecast-days").innerHTML = `<table><tr><th>Day</th><th>Cloud</th><th>Solar</th><th>Load</th><th>Net</th><th>Weather</th></tr>` + f.days.map((d, i) => {
+      const w = (state?.weather?.forecast || []).find((x) => x.date === d.date);
+      return `<tr><td>${new Date(d.date + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}${d.hours_covered < 24 ? ` <span class="muted">(${d.hours_covered} h)</span>` : ""}</td><td>${Math.round(d.cloud_avg * 100)} %</td><td>${d.pv_kwh} kWh</td><td>${d.load_kwh} kWh</td><td style="color:${d.net_kwh >= 0 ? "var(--ok)" : "var(--bad)"}">${d.net_kwh >= 0 ? "+" : ""}${d.net_kwh} kWh</td><td class="muted">${w ? w.narrative : ""}</td></tr>`;
+    }).join("") + "</table>";
+    // chart
+    const labels = f.hours.map((h) => h.ts);
+    const hourly = (pts) => { const m = new Map(); (pts || []).forEach(([t, s]) => { const k = Math.round(t / 3600) * 3600; if (!m.has(k)) m.set(k, s); }); return m; };
+    const base = hourly(plan?.baseline), withp = hourly(plan?.planned);
+    const ds = [
+      { type: "bar", label: "Solar forecast kW", data: f.hours.map((h) => h.pv_kw), backgroundColor: palette.pv + "99", yAxisID: "y" },
+      { type: "line", label: "Load kW", data: f.hours.map((h) => h.load_kw), borderColor: palette.load, yAxisID: "y", borderDash: [2, 3] },
+    ];
+    if (plan) {
+      ds.push({ type: "line", label: "SOC % without generator", data: labels.map((t) => base.get(t) ?? null), borderColor: palette.batt, borderDash: [6, 4], yAxisID: "y1" });
+      ds.push({ type: "line", label: "SOC % with plan", data: labels.map((t) => withp.get(t) ?? null), borderColor: palette.batt, yAxisID: "y1", fill: false });
+    }
+    const ctx = document.getElementById("chart-forecast");
+    const saveRange = range; range = "7d";
+    if (charts["chart-forecast"]) { charts["chart-forecast"].data.labels = labels; charts["chart-forecast"].data.datasets = ds; charts["chart-forecast"].update(); }
+    else {
+      const o = chartOpts("kW"); o.scales.x = { ticks: { maxTicksLimit: 12, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } };
+      o.scales.y1 = { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { callback: (v) => v + " %" } };
+      charts["chart-forecast"] = new Chart(ctx, { data: { labels, datasets: ds }, options: o });
+    }
+    range = saveRange;
+  }
+  $("#forecast-recompute").addEventListener("click", async () => { const r = await fetch("/api/forecast/recompute", { method: "POST" }); toast(r.ok ? "Forecast recomputed" : "Recompute failed"); loadForecast(); });
 
   // ---- settings -----------------------------------------------------------------
   async function loadSettings() {

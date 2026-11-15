@@ -198,6 +198,53 @@ class SimWorld:
         return b"".join(struct.pack(">H", int(round((v + self.rng.gauss(0, 0.002)) * 1000))) for _ in range(16))
 
 
+class SimulatedWeatherFetch:
+    """Stands in for api.weather.com: a station at a fixed location with a
+    pyranometer that follows the clear sky, and a 5-day forecast with
+    plausible cloud cover. Exercises the real parsers."""
+
+    LAT, LON = 39.0, -105.5
+
+    def __init__(self, world: SimWorld) -> None:
+        self.world = world
+
+    def __call__(self, url: str) -> dict:
+        from datetime import datetime, timedelta, timezone
+
+        from ..weather.solar import clear_sky_ghi, solar_position
+
+        now = time.time()
+        if "observations/current" in url:
+            el = solar_position(self.LAT, self.LON, datetime.fromtimestamp(now, timezone.utc))[0]
+            cloud = 0.75 + 0.25 * math.sin(now / 97.0)
+            rad = clear_sky_ghi(el) * cloud
+            return {"observations": [{"stationID": "KSIM0001", "epoch": int(now), "lat": self.LAT, "lon": self.LON,
+                                      "solarRadiation": round(rad, 1), "uv": round(rad / 120, 1), "winddir": 270, "humidity": 40,
+                                      "imperial": {"temp": 38.0, "dewpt": 15.0, "windSpeed": 6.0, "windGust": 11.0,
+                                                   "pressure": 29.9, "precipRate": 0.0, "precipTotal": 0.0}}]}
+        if "forecast/daily" in url:
+            today = datetime.now().replace(hour=7, minute=0, second=0, microsecond=0)
+            rng = random.Random(int(now // 86400))
+            clouds = [rng.choice([5, 15, 30, 55, 80, 95]) for _ in range(10)]
+            days = [today + timedelta(days=i) for i in range(5)]
+            return {
+                "validTimeLocal": [d.strftime("%Y-%m-%dT07:00:00-0700") for d in days],
+                "dayOfWeek": [d.strftime("%A") for d in days],
+                "sunriseTimeLocal": [d.strftime("%Y-%m-%dT06:50:00-0700") for d in days],
+                "sunsetTimeLocal": [d.strftime("%Y-%m-%dT16:45:00-0700") for d in days],
+                "temperatureMax": [None] + [45 + i for i in range(1, 5)],
+                "calendarDayTemperatureMax": [45 + i for i in range(5)],
+                "temperatureMin": [18 + i for i in range(5)],
+                "qpf": [0.0, 0.1, 0.0, 0.0, 0.3], "qpfSnow": [0, 1, 0, 0, 3],
+                "narrative": ["Mostly sunny.", "Snow showers.", "Sunny.", "Partly cloudy.", "Snow."],
+                "daypart": [{"daypartName": [None] + [f"d{i}" for i in range(1, 10)],
+                             "cloudCover": [None] + clouds[1:], "precipChance": [None] + [c // 2 for c in clouds[1:]],
+                             "wxPhraseLong": [None] + ["Cloudy" if c > 50 else "Sunny" for c in clouds[1:]],
+                             "temperature": [None] + [30] * 9, "windSpeed": [None] + [8] * 9, "narrative": [None] + [""] * 9}],
+            }
+        return {}
+
+
 class SimulatedInverterLink(LoopbackLink):
     def __init__(self, world: SimWorld, unit: int = 1) -> None:
         super().__init__(self._respond)
