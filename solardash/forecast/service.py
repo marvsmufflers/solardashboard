@@ -177,7 +177,7 @@ class ForecastTask:
         now = now or time.time()
         loc = self._location()
         if loc is None:
-            self.state.forecast = {"available": False, "reason": "no location: set weather.latitude/longitude (or enable the weather station)"}
+            self.state.forecast = {"available": False, "reason": "Predictions need the cabin's location. Open System, Setup, Location and weather, enter latitude and longitude, and save."}
             return self.state.forecast
         lat, lon = loc
         if time.monotonic() >= self._openmeteo_due:
@@ -230,7 +230,7 @@ class ForecastTask:
         return self.state.forecast
 
     async def run(self) -> None:
-        await asyncio.sleep(5)
+        await asyncio.sleep(1)
         while not self._stop.is_set():
             try:
                 await asyncio.to_thread(self.recompute)

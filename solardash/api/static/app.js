@@ -367,12 +367,13 @@
 
   // ---------- setup ----------
   const SETUP = {
+    weather: null,
     inverter: { title: "Inverter (EG4 6000XP)", fields: {
       enabled: ["Enabled"], port: ["Serial port", "RS485 to the inverter's dongle/INV485 port"], baud: ["Baud", "19200 for the 6000XP"], unit: ["Modbus unit ID", "usually 1"],
       name: ["Name"], poll_interval: ["Poll interval (s)"], settings_poll_interval: ["Settings re-read (s)"], timeout: ["Timeout (s)"],
-      allow_writes: ["Allow changing inverter settings from the app", "leave off until the readings match the inverter's screen"] } },
+      allow_writes: ["Allow changing inverter settings from the app", "OFF = read-only: the app only reads values and can never change the inverter"] } },
     batteries: { title: "Batteries (JBD / Eco-Worthy, one port each)" },
-    weather: { title: "Location & weather", fields: {
+    weather: { title: "Location and weather (needed for predictions)", fields: {
       latitude: ["Latitude", "cabin, decimal degrees (needed for any forecast)"], longitude: ["Longitude", "negative for west"],
       openmeteo_enabled: ["Open-Meteo irradiance forecast", "free, no key"], openmeteo_days: ["Open-Meteo days", "1–16"], openmeteo_interval: ["Open-Meteo refresh (s)"],
       enabled: ["Weather Underground station", "measured conditions + narrative"], station_id: ["Station ID", "e.g. KCOxxxx"], api_key: ["WU API key", "wunderground.com/member/api-keys"],
@@ -392,8 +393,8 @@
     const d = await (await fetch("/api/setup")).json();
     const el = $("#setup"); el.innerHTML = "";
     for (const [sec, meta] of Object.entries(SETUP)) {
-      const s = d.sections[sec]; if (!s) continue;
-      const det = document.createElement("details"); det.className = "sgroup"; if (sec === "inverter") det.open = true; det.innerHTML = `<summary>${meta.title}</summary>`;
+      const s = d.sections[sec]; if (!s || !meta) continue;
+      const det = document.createElement("details"); det.className = "sgroup"; if (sec === "weather" && s.values.latitude == null) det.open = true; det.innerHTML = `<summary>${meta.title}</summary>`;
       const form = document.createElement("div"); form.className = "setup-form";
       if (sec === "batteries") {
         form.innerHTML = `<div class="gen-edit" id="bat-edit"></div><div class="setup-actions"><button class="btn" id="bat-scan">Scan ports</button><button class="btn" id="bat-add">+ Add battery</button><button class="btn primary" data-save="batteries">Save</button></div><div class="muted small" id="port-scan" style="grid-column:1/-1"></div>`;
@@ -472,7 +473,7 @@
     const r = await fetch("/api/setup", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ section, values }) });
     const d = await r.json();
     toast(r.ok ? `Saved · ${d.applied}` : `Not saved: ${d.detail}`, 4000);
-    if (r.ok) { loadSetup(); if (section === "inverter" || section === "batteries") setTimeout(renderSystem, 3000); else if (section !== "mqtt") setTimeout(loadForecast, 2500); }
+    if (r.ok) { loadSetup().then(scanPorts); if (section !== "mqtt" && section !== "inverter" && section !== "batteries") { await new Promise((res) => setTimeout(res, 2500)); await fetch("/api/forecast/recompute", { method: "POST" }).catch(() => {}); } }
   }
 
   // ---------- system ----------
