@@ -367,7 +367,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     """Load ``config.yaml`` (or ``$SOLARDASH_CONFIG``). Missing file => defaults."""
     p = Path(path or os.environ.get("SOLARDASH_CONFIG", "config.yaml"))
     raw: dict[str, Any] = {}
-    if p.exists():
+    if p.is_file():
         with p.open() as fh:
             raw = yaml.safe_load(fh) or {}
     cfg = Config(

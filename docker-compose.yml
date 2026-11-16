@@ -1,15 +1,9 @@
-# solardash — the only file you need.
+# solardash — the only file you need. Put it in a folder on the NAS (the one
+# you already use is fine) and point a Container Manager project at it.
 #
-#   1. File Station: make a folder (e.g. docker/solardash) and put this file in it.
-#   2. Container Manager -> Project -> Create -> choose that folder -> Start.
-#   3. Open http://<nas-ip>:8080 -> System -> Setup: pick the serial ports,
-#      enter your coordinates, and (optionally) the weather key, MQTT, password.
-#
-#   Update: Container Manager -> Image -> solardash -> Update, then
-#           Project -> solardash -> Action -> Restart.
-#
-# Everything you set on the Setup page is kept in the "solardash-data" volume,
-# so updates never lose it. (A config.yaml is optional; see README.)
+# Settings and history live in the "data" folder next to this file, so
+# replacing this file, updating the image or recreating the project keeps them.
+# A config.yaml next to this file is optional and is picked up if present.
 services:
   solardash:
     image: ghcr.io/marvsmufflers/solardash:latest
@@ -19,15 +13,19 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - solardash-data:/app/data
+      - ./data:/app/data            # settings + history (kept across updates)
+      - ./:/app/host:ro             # lets the app read an optional config.yaml
       - /dev:/dev                   # all USB serial adapters, hot-plug safe
+      - /etc/localtime:/etc/localtime:ro   # use the NAS's time zone
     privileged: true                # needed on Synology to open the adapters
     environment:
-      - TZ=America/Los_Angeles
+      - SOLARDASH_CONFIG=/app/host/config.yaml
       - SOLARDASH_PASSWORD=         # optional login for the dashboard
 
-  # Cloudflare Tunnel (remote access). Paste your tunnel token after the "=".
-  # Already running the tunnel in its own container? Delete this whole block.
+  # Cloudflare Tunnel. Paste your tunnel token after the "=" below.
+  # (Cloudflare Zero Trust -> Networks -> Tunnels -> your tunnel -> Configure;
+  # the token is the long string after "--token" in the install command.)
+  # Running the tunnel some other way? Delete this whole block.
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: solardash-tunnel
@@ -37,6 +35,3 @@ services:
       - TUNNEL_TOKEN=
     depends_on:
       - solardash
-
-volumes:
-  solardash-data:
