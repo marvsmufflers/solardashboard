@@ -179,12 +179,15 @@ Chargeverter output while it is selected on the cam switch in the UI.
 | `GET /api/devices`, `GET /api/events`, `GET /api/chargeverter`, `GET /api/inverter/raw` | diagnostics |
 | `WS /ws` | pushes the snapshot about once a second |
 
-## MQTT
+## MQTT / Home Assistant
 
-With `mqtt.enabled: true` solardash publishes `solar_assistant/inverter_1/<metric>/state`,
-`solar_assistant/battery_<n>/<metric>/state`, `solar_assistant/total/<metric>/state` and
-`solar_assistant/chargeverter_1/<metric>/state` (prefix configurable) and Home Assistant discovery
-messages. Writing `solar_assistant/inverter_1/<setting>/set` changes a setting when writes are enabled.
+With `mqtt.enabled: true` solardash publishes every value under `solar_assistant/<device>/<metric>/state`
+(inverter, batteries, totals, generators, weather, forecast, plan; prefix configurable) with Home
+Assistant discovery, so inverter, battery, plan and generator entities appear automatically. It
+subscribes to `inverter_1/<setting>/set`, `occupancy/set` and the generator signal topics.
+Verify the link with `solardash mqtt-test`. Setup, entity list and ready-made automations
+(start/stop the generator from the plan, feed the run-sense wire, presence → occupancy) are in
+[docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md).
 
 ## Development
 

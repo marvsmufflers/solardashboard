@@ -24,6 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     from .tools.probe import add_probe_args
 
     add_probe_args(pr)
+    mt = sub.add_parser("mqtt-test", help="connect to the broker, publish one snapshot with discovery, list topics")
+    mt.add_argument("--simulate", action="store_true", help="use simulated devices for the snapshot")
+    mt.add_argument("--seconds", type=float, default=20.0, help="how long to collect device data first")
     args = p.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -51,6 +54,16 @@ def main(argv: list[str] | None = None) -> int:
         from .tools.probe import run_probe
 
         return run_probe(args)
+    if args.cmd == "mqtt-test":
+        from .tools.mqtt_test import run_mqtt_test
+
+        if args.simulate:
+            cfg.simulate = True
+            if not cfg.batteries:
+                from .config import BatteryConfig
+
+                cfg.batteries = [BatteryConfig(name=f"Battery {i}", port=f"sim{i}") for i in (1, 2, 3)]
+        return run_mqtt_test(cfg, args.seconds)
     p.print_help()
     return 1
 

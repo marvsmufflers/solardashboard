@@ -136,6 +136,11 @@ class Service:
             self._tasks.append(asyncio.create_task(self.forecast.run(), name="forecast"))
         if self.mqtt:
             self._tasks.append(asyncio.create_task(self.mqtt.run(), name="mqtt"))
+        if self.mqtt:
+            from .state import DeviceHealth
+
+            self._mqtt_health = DeviceHealth(name="MQTT broker", kind="mqtt", port=f"{self.cfg.mqtt.host}:{self.cfg.mqtt.port}")
+            self.state.devices["mqtt:broker"] = self._mqtt_health
         self._tasks.append(asyncio.create_task(self._derive_loop(), name="derive"))
         self._tasks.append(asyncio.create_task(self._sample_loop(), name="sample"))
         self.store.add_event("info", "service", "solardash started" + (" (simulation)" if self.cfg.simulate else ""))
@@ -170,6 +175,14 @@ class Service:
                 )
                 self._track_generators()
                 self.state.derived["occupancy"] = self.occupancy_mode()
+                if self.mqtt is not None and hasattr(self, "_mqtt_health"):
+                    h = self._mqtt_health
+                    h.connected = self.mqtt.connected
+                    if h.connected:
+                        h.last_ok = time.time()
+                    h.last_error = self.mqtt.last_error
+                    h.poll_count = self.mqtt.stats["published"]
+                    h.stats = dict(self.mqtt.stats)
                 self.state.bus.publish("total", None)
                 # device up/down events
                 for k, h in self.state.devices.items():
