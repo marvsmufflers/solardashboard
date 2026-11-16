@@ -17,7 +17,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import __version__
-from ..config import Config
+from ..config import (
+    OVERRIDABLE_SECTIONS,
+    SECRET_FIELDS,
+    Config,
+    build_section,
+    load_overrides,
+    overrides_path,
+    save_overrides,
+    section_schema,
+    section_values,
+)
 from .auth import install_password_gate, websocket_allowed
 from ..core.service import Service
 from ..protocols import luxpower as lx
@@ -41,6 +51,11 @@ class OccupancySet(BaseModel):
 class GeneratorSignal(BaseModel):
     running: bool | None = None
     contactor: bool | None = None
+
+
+class SetupWrite(BaseModel):
+    section: str
+    values: Any
 
 
 class SettingWrite(BaseModel):
@@ -169,6 +184,49 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         if svc.forecast is None:
             raise HTTPException(503, "forecast task not running")
         return await asyncio.to_thread(svc.forecast.scorecard, days)
+
+    # -- setup (app configuration from the UI) ------------------------------------
+    @app.get("/api/setup")
+    async def api_setup():
+        ov = load_overrides(overrides_path(cfg))
+        return {
+            "overrides_path": str(overrides_path(cfg) or ""),
+            "sections": {s: {"values": section_values(cfg, s), "schema": section_schema(s), "overridden": sorted((ov.get(s) or {}).keys()) if s != "generators" else bool(ov.get(s))}
+                         for s in OVERRIDABLE_SECTIONS},
+        }
+
+    @app.put("/api/setup")
+    async def api_setup_write(body: SetupWrite):
+        if body.section not in OVERRIDABLE_SECTIONS:
+            raise HTTPException(404, f"unknown section {body.section}")
+        values = body.values
+        if body.section != "generators":
+            if not isinstance(values, dict):
+                raise HTTPException(400, "values must be an object")
+            # keep existing secrets when the form sends the mask or nothing
+            current = section_values(cfg, body.section, mask_secrets=False)
+            for (sec, key) in SECRET_FIELDS:
+                if sec == body.section and values.get(key) in ("", "***", None):
+                    values[key] = current.get(key, "")
+            values = {k: v for k, v in values.items() if k in current}
+        try:
+            if body.section == "generators":
+                built = build_section("generators", values)
+            else:
+                built = build_section(body.section, {**section_values(cfg, body.section, mask_secrets=False), **values})
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"invalid {body.section}: {e}")
+        ov = load_overrides(overrides_path(cfg))
+        if body.section == "generators":
+            ov["generators"] = values
+            cfg.generators = built
+        else:
+            ov[body.section] = {**(ov.get(body.section) or {}), **values}
+            setattr(cfg, body.section, built)
+        save_overrides(overrides_path(cfg), ov)
+        applied = await svc.reconfigure(body.section)
+        svc.store.add_event("info", "setup", f"{body.section} updated ({applied})")
+        return {"section": body.section, "applied": applied, "values": section_values(cfg, body.section)}
 
     @app.get("/api/history/metrics")
     async def api_history_metrics():

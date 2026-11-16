@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +188,161 @@ def _build(cls, data: dict[str, Any] | None):
     return cls(**kwargs)
 
 
+# ---------------------------------------------------------------------------
+# Overrides saved from the Setup page (data/config.overrides.json). They sit on
+# top of config.yaml; env vars only fill secrets that are still empty.
+# ---------------------------------------------------------------------------
+
+OVERRIDABLE_SECTIONS: dict[str, Any] = {
+    "weather": WeatherConfig,
+    "planner": PlannerConfig,
+    "occupancy": OccupancyConfig,
+    "mqtt": MqttConfig,
+    "generators": GeneratorConfig,  # list section
+}
+SECRET_FIELDS = {("weather", "api_key"), ("mqtt", "password")}
+
+
+def overrides_path(cfg: "Config") -> Path | None:
+    if cfg.history.path == ":memory:":
+        return None
+    return Path(cfg.history.path).parent / "config.overrides.json"
+
+
+def load_overrides(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    try:
+        with path.open() as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_overrides(path: Path | None, overrides: dict[str, Any]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w") as fh:
+        json.dump(overrides, fh, indent=2, sort_keys=True)
+    tmp.replace(path)
+
+
+def _check_types(cls, values: dict[str, Any]) -> dict[str, Any]:
+    """Type-check (and lightly coerce) plain values against a dataclass's annotations."""
+    out = dict(values)
+    for f in fields(cls):
+        if f.name not in out:
+            continue
+        v = out[f.name]
+        t = f.type if isinstance(f.type, str) else getattr(f.type, "__name__", str(f.type))
+        optional = "None" in t
+        if v is None or (v == "" and optional and "str" not in t):
+            if optional:
+                out[f.name] = None
+                continue
+            raise ValueError(f"{f.name} is required")
+        if "bool" in t:
+            if not isinstance(v, bool):
+                raise ValueError(f"{f.name} must be true or false")
+        elif "list" in t:
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                raise ValueError(f"{f.name} must be a list of text values")
+        elif "float" in t or "int" in t:
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"{f.name} must be a number")
+            out[f.name] = int(v) if "int" in t and "float" not in t else float(v)
+        elif not isinstance(v, str):
+            raise ValueError(f"{f.name} must be text")
+    return out
+
+
+def _check_ranges(section: str, obj) -> None:
+    if section == "planner":
+        if not (0 <= obj.soc_floor < obj.soc_target <= 100):
+            raise ValueError("need 0 <= soc_floor < soc_target <= 100")
+        if not (obj.soc_target <= obj.soc_target_storm <= 100):
+            raise ValueError("soc_target_storm must be between soc_target and 100")
+        if obj.generator_dc_kw <= 0 or obj.pv_kw_peak <= 0 or obj.max_run_h < obj.min_run_h or obj.horizon_h < 12:
+            raise ValueError("generator_dc_kw and pv_kw_peak must be positive, max_run_h >= min_run_h, horizon_h >= 12")
+        for q in obj.quiet_hours:
+            a, _, b = q.partition("-")
+            if not (a[:2].isdigit() and b[:2].isdigit() and 0 <= int(a[:2]) <= 23 and 0 <= int(b[:2]) <= 23):
+                raise ValueError(f"quiet hours entry {q!r} must look like 22:00-07:00")
+    if section == "weather":
+        if obj.latitude is not None and not -90 <= obj.latitude <= 90:
+            raise ValueError("latitude must be between -90 and 90")
+        if obj.longitude is not None and not -180 <= obj.longitude <= 180:
+            raise ValueError("longitude must be between -180 and 180")
+        if obj.units not in ("e", "m"):
+            raise ValueError("units must be e or m")
+        if (obj.latitude is None) != (obj.longitude is None):
+            raise ValueError("set both latitude and longitude")
+    if section == "occupancy":
+        if not obj.modes or obj.default not in obj.modes:
+            raise ValueError("default mode must be one of the modes")
+    if section == "mqtt" and not 1 <= obj.port <= 65535:
+        raise ValueError("port must be 1-65535")
+
+
+def build_section(section: str, values: Any):
+    """Validate and build one overridable section from plain data."""
+    cls = OVERRIDABLE_SECTIONS.get(section)
+    if cls is None:
+        raise ValueError(f"section {section!r} is not editable")
+    if section == "generators":
+        if not isinstance(values, list):
+            raise ValueError("generators must be a list")
+        gens = [_build(GeneratorConfig, _check_types(GeneratorConfig, g)) for g in values]
+        names = [g.name.strip() for g in gens]
+        if any(not n for n in names) or len(set(names)) != len(names):
+            raise ValueError("generator names must be unique and non-empty")
+        return gens
+    if not isinstance(values, dict):
+        raise ValueError(f"{section} must be an object")
+    obj = _build(cls, _check_types(cls, values))
+    _check_ranges(section, obj)
+    return obj
+
+
+def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
+    for section, values in overrides.items():
+        if section not in OVERRIDABLE_SECTIONS:
+            continue
+        if section == "generators":
+            cfg.generators = build_section(section, values)
+            continue
+        current = asdict(getattr(cfg, section))
+        merged = {**current, **{k: v for k, v in values.items() if k in current}}
+        setattr(cfg, section, build_section(section, merged))
+    return cfg
+
+
+def section_values(cfg: "Config", section: str, mask_secrets: bool = True) -> Any:
+    if section == "generators":
+        return [asdict(g) for g in cfg.generators]
+    d = asdict(getattr(cfg, section))
+    if mask_secrets:
+        for (sec, key) in SECRET_FIELDS:
+            if sec == section and d.get(key):
+                d[key] = "***"
+    return d
+
+
+def section_schema(section: str) -> list[dict[str, Any]]:
+    cls = OVERRIDABLE_SECTIONS[section]
+    out = []
+    for f in fields(cls):
+        t = f.type if isinstance(f.type, str) else getattr(f.type, "__name__", str(f.type))
+        kind = "bool" if "bool" in t else "number" if ("float" in t or "int" in t) else "list" if "list" in t else "text"
+        if (section, f.name) in SECRET_FIELDS:
+            kind = "password"
+        out.append({"key": f.name, "kind": kind})
+    return out
+
+
 def load_config(path: str | os.PathLike | None = None) -> Config:
     """Load ``config.yaml`` (or ``$SOLARDASH_CONFIG``). Missing file => defaults."""
     p = Path(path or os.environ.get("SOLARDASH_CONFIG", "config.yaml"))
@@ -217,7 +373,9 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         cfg.web.password = os.environ["SOLARDASH_PASSWORD"]
     if os.environ.get("SOLARDASH_DB"):
         cfg.history.path = os.environ["SOLARDASH_DB"]
-    if os.environ.get("SOLARDASH_WU_API_KEY"):
+    # Setup-page overrides win over the file; env only fills secrets still empty
+    apply_overrides(cfg, load_overrides(overrides_path(cfg)))
+    if os.environ.get("SOLARDASH_WU_API_KEY") and not cfg.weather.api_key:
         cfg.weather.api_key = os.environ["SOLARDASH_WU_API_KEY"]
     if os.environ.get("SOLARDASH_LOG_LEVEL"):
         cfg.log_level = os.environ["SOLARDASH_LOG_LEVEL"]

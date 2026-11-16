@@ -365,6 +365,83 @@
   }
   $("#settings-refresh").addEventListener("click", async () => { const r = await fetch("/api/settings/refresh", { method: "POST" }); toast(r.ok ? "Settings re-read" : "Re-read failed"); loadSettings(); });
 
+  // ---------- setup ----------
+  const SETUP = {
+    weather: { title: "Location & weather", fields: {
+      latitude: ["Latitude", "cabin, decimal degrees (needed for any forecast)"], longitude: ["Longitude", "negative for west"],
+      openmeteo_enabled: ["Open-Meteo irradiance forecast", "free, no key"], openmeteo_days: ["Open-Meteo days", "1–16"], openmeteo_interval: ["Open-Meteo refresh (s)"],
+      enabled: ["Weather Underground station", "measured conditions + narrative"], station_id: ["Station ID", "e.g. KCOxxxx"], api_key: ["WU API key", "wunderground.com/member/api-keys"],
+      units: ["Units (e/m)", "e for US stations"], poll_interval: ["Station poll (s)"], forecast_interval: ["WU forecast refresh (s)"], provider: null } },
+    planner: { title: "Generator planner", fields: {
+      enabled: ["Planner enabled"], pv_kw_peak: ["Array size (kW)", "used until learned"], battery_kwh: ["Battery (kWh)", "blank = bank Ah × 51.2 V"],
+      soc_floor: ["SOC floor (%)"], soc_target: ["Normal stop (%)"], soc_target_storm: ["Storm stop (%)", "allowed when no surplus is coming"], storm_lookahead_h: ["Storm lookahead (h)"],
+      soc_margin: ["Margin above floor (%)"], generator_dc_kw: ["Generator → battery (kW)", "Chargeverter DC output"], charge_efficiency: ["Charge efficiency"],
+      min_run_h: ["Min run (h)"], max_run_h: ["Max run (h)"], quiet_hours: ["Quiet hours", "comma separated, e.g. 22:00-07:00"], horizon_h: ["Horizon (h)"], recompute_interval: ["Recompute (s)"] } },
+    occupancy: { title: "Occupancy", fields: { enabled: ["Enabled"], modes: ["Modes", "comma separated"], default: ["Default mode"] } },
+    generators: { title: "Generators (feed the Chargeverter via the cam switch)" },
+    mqtt: { title: "MQTT / Home Assistant", fields: {
+      enabled: ["Enabled"], host: ["Broker host"], port: ["Port"], username: ["Username"], password: ["Password"], prefix: ["Topic prefix", "solar_assistant keeps SA-era entities"],
+      ha_discovery: ["Home Assistant discovery"], ha_prefix: ["Discovery prefix"], publish_interval: ["Publish interval (s)"], client_id: ["Client ID"] } },
+  };
+  async function loadSetup() {
+    const d = await (await fetch("/api/setup")).json();
+    const el = $("#setup"); el.innerHTML = "";
+    for (const [sec, meta] of Object.entries(SETUP)) {
+      const s = d.sections[sec]; if (!s) continue;
+      const det = document.createElement("details"); det.className = "sgroup"; det.innerHTML = `<summary>${meta.title}</summary>`;
+      const form = document.createElement("div"); form.className = "setup-form";
+      if (sec === "generators") {
+        form.innerHTML = `<div class="gen-edit" id="gen-edit"></div><div class="setup-actions"><button class="btn" id="gen-add">+ Add generator</button><button class="btn primary" data-save="generators">Save</button></div>`;
+        det.appendChild(form); el.appendChild(det);
+        const box = form.querySelector("#gen-edit");
+        const row = (g = {}) => { const r = document.createElement("div"); r.className = "gen-row"; r.innerHTML = `
+          <div class="field"><label>Name</label><input data-k="name" value="${g.name || ""}"></div><div class="field"><label>Notes</label><input data-k="notes" value="${g.notes || ""}"></div>
+          <div class="field"><label>Running topic <small>MQTT from HA</small></label><input data-k="running_topic" value="${g.running_topic || ""}" placeholder="solardash/generator/x/running"></div>
+          <div class="field"><label>Contactor topic</label><input data-k="contactor_topic" value="${g.contactor_topic || ""}"></div><button class="btn rm">✕</button>`;
+          r.querySelector(".rm").addEventListener("click", () => r.remove()); box.appendChild(r); };
+        s.values.forEach(row); form.querySelector("#gen-add").addEventListener("click", () => row());
+        form.querySelector("[data-save]").addEventListener("click", async () => {
+          const values = [...box.querySelectorAll(".gen-row")].map((r) => Object.fromEntries([...r.querySelectorAll("input")].map((i) => [i.dataset.k, i.value.trim()])));
+          saveSetup("generators", values);
+        });
+        continue;
+      }
+      const kinds = Object.fromEntries(s.schema.map((f) => [f.key, f.kind]));
+      for (const [key, label] of Object.entries(meta.fields)) {
+        if (label === null) continue;
+        const v = s.values[key], kind = kinds[key] || "text", id = `su-${sec}-${key}`;
+        const f = document.createElement("div"); f.className = "field" + (kind === "bool" ? " check" : "");
+        const lab = `<label for="${id}">${label[0]}${label[1] ? ` <small>· ${label[1]}</small>` : ""}</label>`;
+        if (kind === "bool") f.innerHTML = `<input type="checkbox" id="${id}" ${v ? "checked" : ""}>${lab}`;
+        else if (kind === "password") f.innerHTML = `${lab}<input type="password" id="${id}" value="" placeholder="${v ? "•••••• (set)" : "not set"}" autocomplete="off">`;
+        else if (kind === "list") f.innerHTML = `${lab}<input id="${id}" value="${(v || []).join(", ")}">`;
+        else if (kind === "number") f.innerHTML = `${lab}<input type="number" inputmode="decimal" step="any" id="${id}" value="${v ?? ""}">`;
+        else f.innerHTML = `${lab}<input id="${id}" value="${v ?? ""}">`;
+        f.dataset.key = key; f.dataset.kind = kind; form.appendChild(f);
+      }
+      const act = document.createElement("div"); act.className = "setup-actions"; act.innerHTML = `<button class="btn primary">Save</button>`;
+      act.querySelector("button").addEventListener("click", () => {
+        const values = {};
+        form.querySelectorAll(".field").forEach((f) => {
+          const i = f.querySelector("input"); const k = f.dataset.key, kind = f.dataset.kind;
+          if (kind === "bool") values[k] = i.checked;
+          else if (kind === "password") { if (i.value) values[k] = i.value; }
+          else if (kind === "list") values[k] = i.value.split(",").map((x) => x.trim()).filter(Boolean);
+          else if (kind === "number") values[k] = i.value === "" ? null : Number(i.value);
+          else values[k] = i.value;
+        });
+        saveSetup(sec, values);
+      });
+      form.appendChild(act); det.appendChild(form); el.appendChild(det);
+    }
+  }
+  async function saveSetup(section, values) {
+    const r = await fetch("/api/setup", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ section, values }) });
+    const d = await r.json();
+    toast(r.ok ? `Saved · ${d.applied}` : `Not saved: ${d.detail}`, 4000);
+    if (r.ok) { loadSetup(); if (section !== "mqtt") setTimeout(loadForecast, 2500); }
+  }
+
   // ---------- system ----------
   function renderSystem() {
     const dv = state?.devices || {};
@@ -380,7 +457,7 @@
     kv($("#cv"), [["Mode", cv.mode], ["Charger polling", cv.charger_online ? "yes" : "no"], ["Polls / replies", `${cv.poll_count} / ${cv.reply_count}`], ["SOC presented", cv.presented_soc != null ? cv.presented_soc + " %" : null], ["Derived output", fmtW(tot.chargeverter_power)]]);
   }
   async function loadSystem() {
-    renderSystem();
+    renderSystem(); loadSetup();
     const ev = await (await fetch("/api/events?limit=60")).json();
     $("#events").innerHTML = ev.map((e) => `<div><span class="ts">${new Date(e.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span><span><b>${e.source}</b> ${e.message}</span></div>`).join("") || '<div class="muted">no events</div>';
     const st = await (await fetch("/api/history/stats")).json();

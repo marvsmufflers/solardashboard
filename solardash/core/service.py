@@ -60,6 +60,7 @@ class Service:
         self.forecast: ForecastTask | None = None
         self.mqtt: MqttPublisher | None = None
         self._tasks: list[asyncio.Task] = []
+        self._named: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
         self._runtime_day: str | None = None
         self._runtime: dict[str, float] = {}  # generator name -> hours today
@@ -96,6 +97,16 @@ class Service:
         if cfg.chargeverter.enabled and cfg.chargeverter.mode in ("sniff", "emulate"):
             link = SimulatedChargeverterLink(world, with_battery=(cfg.chargeverter.mode == "sniff")) if world else None
             self.chargeverter = ChargeverterTask(cfg.chargeverter, self.state, link=link)
+        self._world = world
+        self._build_weather()
+        self._build_mqtt()
+
+    def _build_weather(self) -> None:
+        cfg = self.cfg
+        world = self._world
+        self.weather = None
+        self.state.devices.pop("weather:wunderground", None)
+        self.state.devices.pop("weather:openmeteo", None)
         if cfg.weather.enabled:
             fetch = None
             if world is not None:
@@ -110,6 +121,11 @@ class Service:
             om_fetch = SimulatedOpenMeteoFetch(world)
         self.forecast = ForecastTask(cfg, self.state, self.store, self.weather, openmeteo_fetch=om_fetch,
                                      occupancy_mode=self.occupancy_mode)
+
+    def _build_mqtt(self) -> None:
+        cfg = self.cfg
+        self.mqtt = None
+        self.state.devices.pop("mqtt:broker", None)
         if cfg.mqtt.enabled:
             topics: dict[str, tuple[str, str]] = {}
             for g in cfg.generators:
@@ -121,6 +137,10 @@ class Service:
                                       signal_topics=topics, on_signal=self.set_generator_signal,
                                       extra_values=lambda: plan_mqtt_values(self.state.forecast),
                                       on_occupancy=self.set_occupancy)
+            from .state import DeviceHealth
+
+            self._mqtt_health = DeviceHealth(name="MQTT broker", kind="mqtt", port=f"{cfg.mqtt.host}:{cfg.mqtt.port}")
+            self.state.devices["mqtt:broker"] = self._mqtt_health
 
     # -- lifecycle -----------------------------------------------------------------
     async def start(self) -> None:
@@ -130,20 +150,50 @@ class Service:
             self._tasks.append(asyncio.create_task(b.run(), name=f"battery{b.index}"))
         if self.chargeverter:
             self._tasks.append(asyncio.create_task(self.chargeverter.run(), name="chargeverter"))
-        if self.weather:
-            self._tasks.append(asyncio.create_task(self.weather.run(), name="weather"))
-        if self.forecast:
-            self._tasks.append(asyncio.create_task(self.forecast.run(), name="forecast"))
-        if self.mqtt:
-            self._tasks.append(asyncio.create_task(self.mqtt.run(), name="mqtt"))
-        if self.mqtt:
-            from .state import DeviceHealth
-
-            self._mqtt_health = DeviceHealth(name="MQTT broker", kind="mqtt", port=f"{self.cfg.mqtt.host}:{self.cfg.mqtt.port}")
-            self.state.devices["mqtt:broker"] = self._mqtt_health
+        self._start_weather_tasks()
+        self._start_mqtt_task()
         self._tasks.append(asyncio.create_task(self._derive_loop(), name="derive"))
         self._tasks.append(asyncio.create_task(self._sample_loop(), name="sample"))
         self.store.add_event("info", "service", "solardash started" + (" (simulation)" if self.cfg.simulate else ""))
+
+    def _start_weather_tasks(self) -> None:
+        if self.weather:
+            self._named["weather"] = asyncio.create_task(self.weather.run(), name="weather")
+        if self.forecast:
+            self._named["forecast"] = asyncio.create_task(self.forecast.run(), name="forecast")
+
+    def _start_mqtt_task(self) -> None:
+        if self.mqtt:
+            self._named["mqtt"] = asyncio.create_task(self.mqtt.run(), name="mqtt")
+
+    async def _stop_named(self, *names: str) -> None:
+        for n in names:
+            t = self._named.pop(n, None)
+            if t is None:
+                continue
+            obj = {"weather": self.weather, "forecast": self.forecast, "mqtt": self.mqtt}.get(n)
+            if obj is not None:
+                obj.stop()
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+    async def reconfigure(self, section: str) -> str:
+        """Apply a changed config section live. Returns what was restarted."""
+        if section in ("weather", "planner", "occupancy"):
+            await self._stop_named("weather", "forecast")
+            self._build_weather()
+            self._start_weather_tasks()
+            return "weather and forecast restarted"
+        if section in ("mqtt", "generators"):
+            await self._stop_named("mqtt")
+            self._build_mqtt()
+            self._start_mqtt_task()
+            self._running_prev = {}
+            return "mqtt restarted"
+        return "no restart needed"
 
     async def stop(self) -> None:
         self._stop.set()
@@ -159,9 +209,9 @@ class Service:
             self.forecast.stop()
         if self.mqtt:
             self.mqtt.stop()
-        for t in self._tasks:
+        for t in list(self._tasks) + list(self._named.values()):
             t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks, *self._named.values(), return_exceptions=True)
         self.store.close()
 
     # -- loops ---------------------------------------------------------------------
