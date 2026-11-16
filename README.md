@@ -42,29 +42,30 @@ solardash serve --simulate --port 8080
 
 Open http://localhost:8080.
 
-## Quick start (real hardware, Docker on Synology)
+## Quick start (real hardware, Synology Container Manager, no SSH)
 
-1. Plug in the USB-RS485 adapters and find them:
+A ready-built image is published to GitHub Container Registry on every commit, so the NAS never
+builds anything.
 
-   ```bash
-   docker compose run --rm solardash solardash probe list
-   docker compose run --rm solardash solardash probe all
-   ```
+1. **File Station:** create a shared folder path such as `docker/solardash`. Put three things in it:
+   `docker-compose.yml` from this repo, `config.yaml` (download `config.example.yaml`, rename it,
+   and set the four serial ports and your coordinates), and an empty folder named `data`.
+2. **Container Manager → Project → Create.** Project name `solardash`, path = that folder, it picks
+   up `docker-compose.yml`. Before starting, fill in `TUNNEL_TOKEN` (Cloudflare) and, if you want it,
+   `SOLARDASH_PASSWORD` in the YAML editor, or delete the `cloudflared` service if your tunnel already
+   runs elsewhere. Start the project.
+3. Open `http://<nas-ip>:8080`. The **System** tab shows which serial adapters answered; the **Setup**
+   card there is where weather, location, planner limits, generators and MQTT are configured.
 
-   `probe all` tries the Luxpower/EG4 inverter protocol and then the JBD protocol on every port and
-   prints what answered. To identify a single port:
+Stop the Solar Assistant container first: only one program can own a serial port.
 
-   ```bash
-   solardash probe inverter --port /dev/ttyACM0
-   solardash probe battery  --port /dev/ttyACM1
-   solardash probe sniff    --port /dev/ttyUSB0 --seconds 20   # Chargeverter bus
-   ```
+**Updating:** Container Manager → **Image** → `ghcr.io/marvsmufflers/solardash` → *Update*, then
+**Project** → `solardash` → *Action* → *Restart*. Then re-add the pinned app on the phone if the
+look didn't change (Safari caches aggressively).
 
-2. `cp config.example.yaml config.yaml` and set the ports (prefer `/dev/serial/by-id/...` names).
-3. `docker compose up -d` and open http://nas-ip:8080.
-
-Settings writes are off by default. Set `inverter.allow_writes: true` only once the read-only data
-matches the inverter's display.
+If the image pull is refused, the GitHub package is still private: on GitHub open the repo →
+Packages → `solardash` → Package settings → *Change visibility* → Public (or add a GitHub token under
+Container Manager → Registry).
 
 ## Wiring summary
 

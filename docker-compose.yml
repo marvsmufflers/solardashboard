@@ -1,49 +1,47 @@
-# Synology / generic Docker deployment.
-#   1. cp config.example.yaml config.yaml   and edit ports, coordinates, keys
-#   2. cp .env.example .env                 and fill in TUNNEL_TOKEN (optional) / SOLARDASH_PASSWORD
-#   3. docker compose up -d
-# Find your adapters with:  docker compose run --rm solardash solardash probe list
+# solardash on a Synology (Container Manager) or any Docker host. No SSH needed:
+#   1. In File Station make a folder (e.g. docker/solardash) and put this file,
+#      config.yaml (copy of config.example.yaml, edited) and an empty "data"
+#      folder in it.
+#   2. Container Manager -> Project -> Create -> pick that folder -> Start.
+#   3. Update later: Container Manager -> Image -> solardash -> Update, then
+#      Project -> solardash -> Action -> Restart. (Or Project -> Build.)
+# Find your serial adapters afterwards on the dashboard's System tab.
 services:
   solardash:
-    build: .
-    image: solardash:latest
+    image: ghcr.io/marvsmufflers/solardash:latest   # built automatically from GitHub
+    pull_policy: always
+    # To build from source instead, remove the image line and uncomment:
+    # build: .
     container_name: solardash
     restart: unless-stopped
     ports:
       - "8080:8080"            # LAN access; the tunnel reaches it on the compose network
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./data:/app/data
-    # Option A (simple): pass the individual serial devices. Names can shift
-    # after a USB re-enumeration; prefer /dev/serial/by-id or by-path paths.
+      - ./data:/app/data      # history database and Setup-page overrides
+    # Serial adapters. Names can shift after a USB re-enumeration; the app
+    # reopens them, but if the order changes edit config.yaml.
     devices:
       - /dev/ttyACM0:/dev/ttyACM0
       - /dev/ttyACM1:/dev/ttyACM1
       - /dev/ttyACM2:/dev/ttyACM2
       - /dev/ttyACM3:/dev/ttyACM3
-    # Option B: if your Docker host exposes stable symlinks, map the directory
-    # and use /dev/serial/by-path/... names in config.yaml:
-    #   - /dev/serial:/dev/serial
-    #   (requires `privileged: true` on most Synology DSM versions)
     environment:
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=America/Los_Angeles
       - SOLARDASH_LOG_LEVEL=INFO
-      - SOLARDASH_PASSWORD=${SOLARDASH_PASSWORD:-}   # optional second layer behind Access
-      - SOLARDASH_WU_API_KEY=${SOLARDASH_WU_API_KEY:-}
-      # - SOLARDASH_SIMULATE=true                    # run without hardware
+      - SOLARDASH_PASSWORD=          # optional dashboard login (second layer behind Cloudflare Access)
+      - SOLARDASH_WU_API_KEY=        # or set it on the Setup page
+      # - SOLARDASH_SIMULATE=true    # run without hardware
 
-  # Remote access: Cloudflare Tunnel. Create the tunnel in Zero Trust ->
-  # Networks -> Tunnels, add a public hostname pointing at http://solardash:8080,
-  # put an Access policy on that hostname, and paste the tunnel token in .env.
-  # Nothing is opened on your router; the connector dials out (works behind
-  # Starlink / cellular CGNAT). Remove this service if you use Tailscale instead.
+  # Cloudflare Tunnel connector. Paste the tunnel token from Zero Trust ->
+  # Networks -> Tunnels. Delete this whole service if you run the tunnel some
+  # other way (e.g. its own container already set up in Container Manager).
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: solardash-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+      - TUNNEL_TOKEN=
     depends_on:
       - solardash
-    profiles: ["tunnel"]     # start with:  docker compose --profile tunnel up -d
