@@ -365,116 +365,95 @@
   }
   $("#settings-refresh").addEventListener("click", async () => { const r = await fetch("/api/settings/refresh", { method: "POST" }); toast(r.ok ? "Settings re-read" : "Re-read failed"); loadSettings(); });
 
-  // ---------- setup ----------
-  const SETUP = {
-    weather: null,
-    inverter: { title: "Inverter (EG4 6000XP)", fields: {
-      enabled: ["Enabled"], port: ["Serial port", "RS485 to the inverter's dongle/INV485 port"], baud: ["Baud", "19200 for the 6000XP"], unit: ["Modbus unit ID", "usually 1"],
-      name: ["Name"], poll_interval: ["Poll interval (s)"], settings_poll_interval: ["Settings re-read (s)"], timeout: ["Timeout (s)"],
-      allow_writes: ["Allow changing inverter settings from the app", "OFF = read-only: the app only reads values and can never change the inverter"] } },
-    batteries: { title: "Batteries (JBD / Eco-Worthy, one port each)" },
-    weather: { title: "Location and weather (needed for predictions)", fields: {
-      latitude: ["Latitude", "cabin, decimal degrees (needed for any forecast)"], longitude: ["Longitude", "negative for west"],
-      openmeteo_enabled: ["Open-Meteo irradiance forecast", "free, no key"], openmeteo_days: ["Open-Meteo days", "1–16"], openmeteo_interval: ["Open-Meteo refresh (s)"],
-      enabled: ["Weather Underground station", "measured conditions + narrative"], station_id: ["Station ID", "e.g. KCOxxxx"], api_key: ["WU API key", "wunderground.com/member/api-keys"],
-      units: ["Units (e/m)", "e for US stations"], poll_interval: ["Station poll (s)"], forecast_interval: ["WU forecast refresh (s)"], provider: null } },
-    planner: { title: "Generator planner", fields: {
-      enabled: ["Planner enabled"], pv_kw_peak: ["Array size (kW)", "used until learned"], battery_kwh: ["Battery (kWh)", "blank = bank Ah × 51.2 V"],
-      soc_floor: ["SOC floor (%)"], soc_target: ["Normal stop (%)"], soc_target_storm: ["Storm stop (%)", "allowed when no surplus is coming"], storm_lookahead_h: ["Storm lookahead (h)"],
-      soc_margin: ["Margin above floor (%)"], generator_dc_kw: ["Generator → battery (kW)", "Chargeverter DC output"], charge_efficiency: ["Charge efficiency"],
-      min_run_h: ["Min run (h)"], max_run_h: ["Max run (h)"], quiet_hours: ["Quiet hours", "comma separated, e.g. 22:00-07:00"], horizon_h: ["Horizon (h)"], recompute_interval: ["Recompute (s)"] } },
-    occupancy: { title: "Occupancy", fields: { enabled: ["Enabled"], modes: ["Modes", "comma separated"], default: ["Default mode"] } },
-    generators: { title: "Generators (feed the Chargeverter via the cam switch)" },
-    mqtt: { title: "MQTT / Home Assistant", fields: {
-      enabled: ["Enabled"], host: ["Broker host"], port: ["Port"], username: ["Username"], password: ["Password"], prefix: ["Topic prefix", "solar_assistant keeps SA-era entities"],
-      ha_discovery: ["Home Assistant discovery"], ha_prefix: ["Discovery prefix"], publish_interval: ["Publish interval (s)"], client_id: ["Client ID"] } },
+  // ---------- setup (one form, one Save) ----------
+  let setupLoaded = null;
+  const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const fld = (sec, key, label, kind, v, opt = {}) => {
+    const id = `su-${sec}-${key}`, d = `data-sec="${sec}" data-key="${key}" data-kind="${kind}"`;
+    if (kind === "bool") return `<div class="field check ${opt.wide ? "wide" : ""}"><input type="checkbox" id="${id}" ${d} ${v ? "checked" : ""}><label for="${id}">${label}</label></div>`;
+    const type = kind === "number" ? 'type="number" inputmode="decimal" step="any"' : kind === "password" ? 'type="password" autocomplete="off"' : "";
+    const val = kind === "password" ? "" : kind === "list" ? (v || []).join(", ") : v ?? "";
+    return `<div class="field ${opt.wide ? "wide" : ""}"><label for="${id}">${label}</label><input id="${id}" ${d} ${type} value="${esc(val)}" placeholder="${esc(opt.ph ?? (kind === "password" && v ? "•••••• (saved)" : ""))}" ${opt.list ? `list="${opt.list}"` : ""}></div>`;
   };
   async function loadSetup() {
-    const d = await (await fetch("/api/setup")).json();
-    const el = $("#setup"); el.innerHTML = "";
-    for (const [sec, meta] of Object.entries(SETUP)) {
-      const s = d.sections[sec]; if (!s || !meta) continue;
-      const det = document.createElement("details"); det.className = "sgroup"; if (sec === "weather" && s.values.latitude == null) det.open = true; det.innerHTML = `<summary>${meta.title}</summary>`;
-      const form = document.createElement("div"); form.className = "setup-form";
-      if (sec === "batteries") {
-        form.innerHTML = `<div class="gen-edit" id="bat-edit"></div><div class="setup-actions"><button class="btn" id="bat-scan">Scan ports</button><button class="btn" id="bat-add">+ Add battery</button><button class="btn primary" data-save="batteries">Save</button></div><div class="muted small" id="port-scan" style="grid-column:1/-1"></div>`;
-        det.appendChild(form); el.appendChild(det);
-        const box = form.querySelector("#bat-edit");
-        const row = (b = {}) => { const r = document.createElement("div"); r.className = "gen-row"; r.innerHTML = `
-          <div class="field"><label>Name</label><input data-k="name" value="${b.name || ""}"></div>
-          <div class="field"><label>Serial port</label><input data-k="port" list="port-list" value="${b.port || ""}" placeholder="/dev/ttyACM1"></div>
-          <div class="field"><label>Capacity (Ah)</label><input data-k="capacity_ah" type="number" inputmode="decimal" value="${b.capacity_ah ?? 100}"></div>
-          <div class="field check"><input data-k="enabled" type="checkbox" ${b.enabled !== false ? "checked" : ""}><label>Enabled</label></div><button class="btn rm">✕</button>`;
-          r.querySelector(".rm").addEventListener("click", () => r.remove()); box.appendChild(r); };
-        s.values.forEach(row); form.querySelector("#bat-add").addEventListener("click", () => row({ name: `Battery ${box.children.length + 1}`, port: "" }));
-        form.querySelector("#bat-scan").addEventListener("click", scanPorts);
-        form.querySelector("[data-save]").addEventListener("click", async () => {
-          const values = [...box.querySelectorAll(".gen-row")].map((r) => { const o = {}; r.querySelectorAll("input").forEach((i) => { o[i.dataset.k] = i.type === "checkbox" ? i.checked : i.type === "number" ? Number(i.value) : i.value.trim(); }); return o; });
-          saveSetup("batteries", values);
-        });
-        continue;
-      }
-      if (sec === "generators") {
-        form.innerHTML = `<div class="gen-edit" id="gen-edit"></div><div class="setup-actions"><button class="btn" id="gen-add">+ Add generator</button><button class="btn primary" data-save="generators">Save</button></div>`;
-        det.appendChild(form); el.appendChild(det);
-        const box = form.querySelector("#gen-edit");
-        const row = (g = {}) => { const r = document.createElement("div"); r.className = "gen-row"; r.innerHTML = `
-          <div class="field"><label>Name</label><input data-k="name" value="${g.name || ""}"></div><div class="field"><label>Notes</label><input data-k="notes" value="${g.notes || ""}"></div>
-          <div class="field"><label>Running topic <small>MQTT from HA</small></label><input data-k="running_topic" value="${g.running_topic || ""}" placeholder="solardash/generator/x/running"></div>
-          <div class="field"><label>Contactor topic</label><input data-k="contactor_topic" value="${g.contactor_topic || ""}"></div><button class="btn rm">✕</button>`;
-          r.querySelector(".rm").addEventListener("click", () => r.remove()); box.appendChild(r); };
-        s.values.forEach(row); form.querySelector("#gen-add").addEventListener("click", () => row());
-        form.querySelector("[data-save]").addEventListener("click", async () => {
-          const values = [...box.querySelectorAll(".gen-row")].map((r) => Object.fromEntries([...r.querySelectorAll("input")].map((i) => [i.dataset.k, i.value.trim()])));
-          saveSetup("generators", values);
-        });
-        continue;
-      }
-      const kinds = Object.fromEntries(s.schema.map((f) => [f.key, f.kind]));
-      for (const [key, label] of Object.entries(meta.fields)) {
-        if (label === null) continue;
-        const v = s.values[key], kind = kinds[key] || "text", id = `su-${sec}-${key}`;
-        const f = document.createElement("div"); f.className = "field" + (kind === "bool" ? " check" : "");
-        const lab = `<label for="${id}">${label[0]}${label[1] ? ` <small>· ${label[1]}</small>` : ""}</label>`;
-        if (key === "port") f.innerHTML = `${lab}<input id="${id}" list="port-list" value="${v ?? ""}" placeholder="/dev/ttyACM0">`;
-        else if (kind === "bool") f.innerHTML = `<input type="checkbox" id="${id}" ${v ? "checked" : ""}>${lab}`;
-        else if (kind === "password") f.innerHTML = `${lab}<input type="password" id="${id}" value="" placeholder="${v ? "•••••• (set)" : "not set"}" autocomplete="off">`;
-        else if (kind === "list") f.innerHTML = `${lab}<input id="${id}" value="${(v || []).join(", ")}">`;
-        else if (kind === "number") f.innerHTML = `${lab}<input type="number" inputmode="decimal" step="any" id="${id}" value="${v ?? ""}">`;
-        else f.innerHTML = `${lab}<input id="${id}" value="${v ?? ""}">`;
-        f.dataset.key = key; f.dataset.kind = kind; form.appendChild(f);
-      }
-      const act = document.createElement("div"); act.className = "setup-actions"; act.innerHTML = `<button class="btn primary">Save</button>`;
-      act.querySelector("button").addEventListener("click", () => {
-        const values = {};
-        form.querySelectorAll(".field").forEach((f) => {
-          const i = f.querySelector("input"); const k = f.dataset.key, kind = f.dataset.kind;
-          if (kind === "bool") values[k] = i.checked;
-          else if (kind === "password") { if (i.value) values[k] = i.value; }
-          else if (kind === "list") values[k] = i.value.split(",").map((x) => x.trim()).filter(Boolean);
-          else if (kind === "number") values[k] = i.value === "" ? null : Number(i.value);
-          else values[k] = i.value;
-        });
-        saveSetup(sec, values);
-      });
-      form.appendChild(act); det.appendChild(form); el.appendChild(det);
-    }
+    const d = await (await fetch("/api/setup")).json(); setupLoaded = d.sections;
+    const w = d.sections.weather.values, pl = d.sections.planner.values, m = d.sections.mqtt.values, inv = d.sections.inverter.values, oc = d.sections.occupancy.values;
+    const batRow = (b = {}) => `<div class="su-row" data-row="battery"><div class="field"><label>Name</label><input data-k="name" value="${esc(b.name)}"></div><div class="field"><label>Port</label><input data-k="port" list="port-list" value="${esc(b.port)}" placeholder="/dev/ttyACM1"></div><button class="btn rm" type="button">✕</button></div>`;
+    const genRow = (g = {}) => `<div class="su-row" data-row="generator" data-rt="${esc(g.running_topic)}" data-ct="${esc(g.contactor_topic)}" data-notes="${esc(g.notes)}"><div class="field wide" style="grid-column:1/3"><label>Name</label><input data-k="name" value="${esc(g.name)}"></div><button class="btn rm" type="button">✕</button></div>`;
+    $("#setup").innerHTML = `
+      <div class="su-group"><h3>Cabin location</h3><div class="su-grid">
+        ${fld("weather", "latitude", "Latitude", "number", w.latitude, { ph: "39.1234" })}${fld("weather", "longitude", "Longitude", "number", w.longitude, { ph: "-105.1234" })}</div>
+        <div class="su-note">Needed for the solar forecast and generator plan.</div></div>
+      <div class="su-group"><h3>Solar, battery, generator</h3><div class="su-grid">
+        ${fld("planner", "pv_kw_peak", "Solar array (kW)", "number", pl.pv_kw_peak)}${fld("planner", "generator_dc_kw", "Generator charge (kW)", "number", pl.generator_dc_kw)}
+        ${fld("planner", "soc_floor", "Start generator at (%)", "number", pl.soc_floor)}${fld("planner", "soc_target", "Stop at (%)", "number", pl.soc_target)}
+        ${fld("planner", "soc_target_storm", "Stop at before storms (%)", "number", pl.soc_target_storm)}${fld("planner", "quiet_hours", "Quiet hours", "list", pl.quiet_hours, { ph: "22:00-07:00" })}</div></div>
+      <div class="su-group"><h3>Devices</h3>
+        <div class="su-grid">${fld("inverter", "port", "Inverter port", "text", inv.port, { list: "port-list", wide: true })}</div>
+        <div class="su-rows" id="su-bats" style="margin-top:10px">${d.sections.batteries.values.map(batRow).join("")}</div>
+        <button class="btn" type="button" id="su-bat-add">+ Battery</button>
+        <div class="su-note" id="port-scan"></div>
+        <div style="margin-top:10px">${fld("inverter", "allow_writes", "Allow changing inverter settings (off = read-only)", "bool", inv.allow_writes)}</div></div>
+      <div class="su-group"><h3>Generators on the cam switch</h3><div class="su-rows" id="su-gens">${d.sections.generators.values.map(genRow).join("")}</div><button class="btn" type="button" id="su-gen-add">+ Generator</button></div>
+      <div class="su-group"><h3>Weather Underground station (optional)</h3>${fld("weather", "enabled", "Use my station", "bool", w.enabled)}
+        <div class="su-grid" style="margin-top:8px">${fld("weather", "station_id", "Station ID", "text", w.station_id, { ph: "KCOxxxxx" })}${fld("weather", "api_key", "API key", "password", w.api_key)}</div></div>
+      <div class="su-group"><h3>Home Assistant / MQTT (optional)</h3>${fld("mqtt", "enabled", "Publish to MQTT", "bool", m.enabled)}
+        <div class="su-grid" style="margin-top:8px">${fld("mqtt", "host", "Broker address", "text", m.host)}${fld("mqtt", "port", "Port", "number", m.port)}${fld("mqtt", "username", "Username", "text", m.username)}${fld("mqtt", "password", "Password", "password", m.password)}</div></div>
+      <div class="su-group su-adv"><details><summary>Advanced</summary><div class="su-grid" style="margin-top:8px">
+        ${fld("inverter", "baud", "Inverter baud", "number", inv.baud)}${fld("inverter", "unit", "Inverter Modbus ID", "number", inv.unit)}${fld("inverter", "poll_interval", "Inverter poll (s)", "number", inv.poll_interval)}${fld("planner", "battery_kwh", "Battery kWh (blank = auto)", "number", pl.battery_kwh)}
+        ${fld("planner", "soc_margin", "Planning margin (%)", "number", pl.soc_margin)}${fld("planner", "storm_lookahead_h", "Storm lookahead (h)", "number", pl.storm_lookahead_h)}${fld("planner", "min_run_h", "Min run (h)", "number", pl.min_run_h)}${fld("planner", "max_run_h", "Max run (h)", "number", pl.max_run_h)}
+        ${fld("planner", "horizon_h", "Forecast horizon (h)", "number", pl.horizon_h)}${fld("planner", "charge_efficiency", "Charge efficiency", "number", pl.charge_efficiency)}${fld("weather", "units", "WU units (e/m)", "text", w.units)}${fld("mqtt", "prefix", "MQTT topic prefix", "text", m.prefix)}
+        ${fld("occupancy", "modes", "Occupancy modes", "list", oc.modes)}${fld("occupancy", "default", "Default occupancy", "text", oc.default)}
+        ${fld("weather", "openmeteo_enabled", "Open-Meteo forecast", "bool", w.openmeteo_enabled, { wide: true })}${fld("mqtt", "ha_discovery", "Home Assistant discovery", "bool", m.ha_discovery, { wide: true })}${fld("planner", "enabled", "Generator planner", "bool", pl.enabled, { wide: true })}
+      </div></details></div>`;
+    const wire = (boxId, addId, rowFn, blank) => {
+      const box = $(boxId);
+      box.addEventListener("click", (e) => { if (e.target.classList.contains("rm")) e.target.closest(".su-row").remove(); });
+      $(addId).addEventListener("click", () => box.insertAdjacentHTML("beforeend", rowFn(blank(box.children.length + 1))));
+    };
+    wire("#su-bats", "#su-bat-add", batRow, (n) => ({ name: `Battery ${n}`, port: "" }));
+    wire("#su-gens", "#su-gen-add", genRow, (n) => ({ name: `Generator ${n}` }));
+    scanPorts();
   }
   async function scanPorts() {
-    const out = $("#port-scan"); if (!out) return; out.textContent = "scanning…";
+    const out = $("#port-scan"); if (!out) return;
     try {
       const d = await (await fetch("/api/setup/ports")).json();
       let dl = document.getElementById("port-list"); if (!dl) { dl = document.createElement("datalist"); dl.id = "port-list"; document.body.appendChild(dl); }
       dl.innerHTML = d.ports.filter((p) => p.device).map((p) => `<option value="${p.device}">`).join("");
-      out.innerHTML = d.ports.length ? "Found: " + d.ports.map((p) => `<code>${p.device}</code>${p.description ? " " + p.description : ""}${p.used_by ? ` → ${p.used_by}` : ""}`).join(" · ") : "No serial ports visible. Is the adapter plugged in and /dev mapped into the container?";
-    } catch (e) { out.textContent = "scan failed"; }
+      const devs = d.ports.filter((p) => p.device && !/ttyS\d/.test(p.device));
+      out.innerHTML = devs.length ? "Adapters found: " + devs.map((p) => `<code>${p.device}</code>${p.used_by ? " " + p.used_by : ""}`).join(" · ") : "No USB serial adapters visible to the app.";
+    } catch (e) { out.textContent = ""; }
   }
-  async function saveSetup(section, values) {
-    const r = await fetch("/api/setup", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ section, values }) });
-    const d = await r.json();
-    toast(r.ok ? `Saved · ${d.applied}` : `Not saved: ${d.detail}`, 4000);
-    if (r.ok) { loadSetup().then(scanPorts); if (section !== "mqtt" && section !== "inverter" && section !== "batteries") { await new Promise((res) => setTimeout(res, 2500)); await fetch("/api/forecast/recompute", { method: "POST" }).catch(() => {}); } }
+  async function saveSetupAll() {
+    if (!setupLoaded) return;
+    const btn = $("#setup-save"); btn.disabled = true; btn.textContent = "Saving…";
+    const bySec = {};
+    document.querySelectorAll("#setup [data-sec]").forEach((i) => {
+      const { sec, key, kind } = i.dataset; let v;
+      if (kind === "bool") v = i.checked;
+      else if (kind === "password") { if (!i.value) return; v = i.value; }
+      else if (kind === "list") v = i.value.split(",").map((x) => x.trim()).filter(Boolean);
+      else if (kind === "number") v = i.value === "" ? null : Number(i.value);
+      else v = i.value.trim();
+      const cur = setupLoaded[sec].values[key];
+      if (JSON.stringify(v) !== JSON.stringify(cur)) (bySec[sec] = bySec[sec] || {})[key] = v;
+    });
+    const bats = [...document.querySelectorAll('#su-bats .su-row')].map((r, i) => { const o = { ...(setupLoaded.batteries.values[i] || {}) }; r.querySelectorAll("input").forEach((x) => (o[x.dataset.k] = x.value.trim())); o.enabled = true; return o; });
+    if (JSON.stringify(bats) !== JSON.stringify(setupLoaded.batteries.values)) bySec.batteries = bats;
+    const gens = [...document.querySelectorAll('#su-gens .su-row')].map((r) => ({ name: r.querySelector("input").value.trim(), notes: r.dataset.notes || "", running_topic: r.dataset.rt || "", contactor_topic: r.dataset.ct || "" }));
+    const curG = setupLoaded.generators.values.map((g) => ({ name: g.name, notes: g.notes || "", running_topic: g.running_topic || "", contactor_topic: g.contactor_topic || "" }));
+    if (JSON.stringify(gens) !== JSON.stringify(curG)) bySec.generators = gens.map((g, i) => ({ ...(setupLoaded.generators.values.find((x) => x.name === g.name) || {}), ...g }));
+    const errors = []; let saved = 0;
+    for (const [section, values] of Object.entries(bySec)) {
+      const r = await fetch("/api/setup", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ section, values }) });
+      if (r.ok) saved++; else errors.push(`${section}: ${(await r.json()).detail}`);
+    }
+    btn.disabled = false; btn.textContent = "Save";
+    toast(errors.length ? errors.join(" · ") : saved ? "Saved" : "Nothing changed", errors.length ? 7000 : 2500);
+    if (saved) { await loadSetup(); setTimeout(() => fetch("/api/forecast/recompute", { method: "POST" }).catch(() => {}), 2500); }
   }
+  $("#setup-save").addEventListener("click", saveSetupAll);
 
   // ---------- system ----------
   function renderSystem() {
@@ -491,7 +470,7 @@
     kv($("#cv"), [["Mode", cv.mode], ["Charger polling", cv.charger_online ? "yes" : "no"], ["Polls / replies", `${cv.poll_count} / ${cv.reply_count}`], ["SOC presented", cv.presented_soc != null ? cv.presented_soc + " %" : null], ["Derived output", fmtW(tot.chargeverter_power)]]);
   }
   async function loadSystem() {
-    renderSystem(); loadSetup().then(scanPorts);
+    renderSystem(); loadSetup();
     const ev = await (await fetch("/api/events?limit=60")).json();
     $("#events").innerHTML = ev.map((e) => `<div><span class="ts">${new Date(e.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span><span><b>${e.source}</b> ${e.message}</span></div>`).join("") || '<div class="muted">no events</div>';
     const st = await (await fetch("/api/history/stats")).json();

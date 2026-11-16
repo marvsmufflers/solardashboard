@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -92,9 +92,23 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         log.info("web: password protection enabled")
 
     # -- pages ---------------------------------------------------------------
+    def _asset_version() -> str:
+        import hashlib
+
+        h = hashlib.sha1()
+        for name in ("app.js", "style.css", "index.html"):
+            h.update((STATIC / name).read_bytes())
+        return h.hexdigest()[:10]
+
+    asset_version = _asset_version()
+
     @app.get("/", include_in_schema=False)
     async def index():
-        return FileResponse(STATIC / "index.html")
+        # version the asset URLs so browsers and Cloudflare never serve a stale UI after an update
+        html = (STATIC / "index.html").read_text()
+        for name in ("style.css", "app.js", "chart.umd.min.js", "manifest.json"):
+            html = html.replace(f"/static/{name}", f"/static/{name}?v={asset_version}")
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
