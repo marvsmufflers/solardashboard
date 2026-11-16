@@ -225,3 +225,48 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .su-note { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 .su-adv summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
 @media (min-width: 760px) { .su-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* ===== design pass 2 ===== */
+:root { --radius: 20px; --card: #131a25; --card-2: #1a2331; --line: #222d3f; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --card: #ffffff; --card-2: #f4f6fa; --line: #e3e8ef; } }
+svg.ic { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.brand svg.logo { color: var(--accent); width: 20px; height: 20px; }
+.brand { letter-spacing: -.02em; }
+body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb, var(--accent) 7%, var(--bg)), var(--bg)) fixed, var(--bg); }
+.card, .tile, .pack { border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px -16px rgba(0,0,0,.6); }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
+.tabbar button { gap: 4px; font-size: 10.5px; font-weight: 500; letter-spacing: .01em; }
+.tabbar button .ic { width: 23px; height: 23px; }
+.tabbar button.active .ic { stroke-width: 2.1; }
+.gauge circle { stroke-width: 15; }
+.gauge-fill { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-2) 55%, transparent)); }
+.gauge-value { font-size: 56px; font-weight: 750; }
+.hero-stat .v { font-size: 28px; }
+.hero-stat .k, .tile .k { font-size: 11px; font-weight: 600; }
+/* flow */
+.flow-card { padding: 14px 8px 8px; }
+.flow { max-width: 440px; max-height: none; }
+.flow .fl { stroke: var(--line); stroke-width: 3.5; }
+.flow .fl.on { stroke-dasharray: 2 9; stroke-width: 4; animation: flow .9s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -22; } }
+.flow .node circle { fill: var(--card-2); stroke-width: 2.5; }
+.flow .node use { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.flow .n-pv circle { stroke: color-mix(in srgb, var(--pv) 70%, transparent); } .flow .n-pv use { stroke: var(--pv); }
+.flow .n-gen circle { stroke: color-mix(in srgb, var(--gen) 70%, transparent); } .flow .n-gen use { stroke: var(--gen); }
+.flow .n-batt circle { stroke: color-mix(in srgb, var(--batt) 70%, transparent); } .flow .n-batt use { stroke: var(--batt); }
+.flow .n-home circle { stroke: color-mix(in srgb, var(--load) 75%, transparent); fill: color-mix(in srgb, var(--load) 10%, var(--card-2)); } .flow .n-home use { stroke: var(--load); }
+.flow .node.idle circle { stroke: var(--line); } .flow .node.idle use { stroke: var(--muted); } .flow .node.idle .nv { fill: var(--muted); }
+.flow .nv { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.flow .nv.big { font-size: 16px; }
+.flow .nl { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; }
+/* tiles */
+.tile { min-height: 104px; }
+.tile .v { font-size: 26px; }
+.tile:has(.spark) { padding-bottom: 46px; }
+.plan-mini { cursor: pointer; }
+.plan-mini .row { margin-bottom: 6px; }
+.pm-title { font-size: 16px; letter-spacing: -.01em; }
+.chips button.active { box-shadow: none; background: var(--line); }
+.kv-item .k { font-size: 11.5px; letter-spacing: .02em; }
+.kv-item .v { font-size: 15px; }
+.day, .gen, .dev { background: color-mix(in srgb, var(--card-2) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }

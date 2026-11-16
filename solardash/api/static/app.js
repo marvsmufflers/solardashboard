@@ -7,14 +7,14 @@
   const ago = (s) => (s == null ? "" : s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${(s / 3600).toFixed(1)}h ago`);
   const fmtDT = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
   const hours = (h) => (h == null ? "–" : h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`);
-  const TABS = [["home", "⌂", "Home"], ["battery", "▮", "Battery"], ["generator", "⚡", "Generator"], ["inverter", "≋", "Inverter"], ["system", "⚙", "System"]];
+  const TABS = [["home", "i-home", "Home"], ["battery", "i-battery", "Battery"], ["generator", "i-bolt", "Generator"], ["inverter", "i-wave", "Inverter"], ["system", "i-sliders", "Setup"]];
   let state = null, range = "24h", settingsLoaded = false, ws, tab = "home";
   const charts = {};
   const palette = () => ({ pv: css("--pv"), load: css("--load"), batt: css("--batt"), gen: css("--gen"), cv: css("--cv"), muted: css("--muted"), line: css("--line"), text: css("--text") });
 
   // ---------- navigation ----------
   function buildNav() {
-    const mk = (cls) => TABS.map(([id, ic, label]) => `<button data-tab="${id}" class="${id === tab ? "active" : ""}">${cls === "tabbar" ? `<span class="ic">${ic}</span>` : ""}${label}</button>`).join("");
+    const mk = (cls) => TABS.map(([id, ic, label]) => `<button data-tab="${id}" class="${id === tab ? "active" : ""}">${cls === "tabbar" ? `<svg class="ic"><use href="#${ic}"/></svg>` : ""}${label}</button>`).join("");
     $("#tabbar").innerHTML = mk("tabbar");
     $("#nav-desktop").innerHTML = mk("desktop");
     document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -95,6 +95,8 @@
     $("#fn-pv").textContent = fmtW(pv); $("#fn-load").textContent = fmtW(load); $("#fn-gen").textContent = tot.generator_running ? fmtW(gen) : (gen == null ? "–" : "off"); $("#fn-batt").textContent = bp == null ? "–" : fmtW(Math.abs(bp));
     $("#fn-gen-label").textContent = (tot.generator_active || "generator").split(" ")[0].toLowerCase();
     $("#fn-batt-label").textContent = soc == null ? "battery" : `battery ${Math.round(soc)} %`;
+    const idle = (sel, on) => document.querySelector(sel)?.classList.toggle("idle", !on);
+    idle(".n-pv", pv > 20); idle(".n-gen", tot.generator_running); idle(".n-batt", bp != null && Math.abs(bp) > 20);
     const line = (id, cls, p, rev) => { const el = $("#" + id); el.className = `fl ${cls} ${p != null && Math.abs(p) > 20 ? "on" : ""} ${rev ? "rev" : ""}`; };
     line("fl-pv", "pv", pv, false); line("fl-gen", "gen", tot.generator_running ? gen : 0, false); line("fl-batt", "batt", bp, bp > 0);
     // tiles

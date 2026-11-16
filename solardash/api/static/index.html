@@ -18,8 +18,16 @@
 <script src="/static/chart.umd.min.js"></script>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-battery" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><path d="M6 10.5v3M9.5 10.5v3" /></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2.5 12h4l3-7.5 4.5 15 3-7.5h4.5"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></symbol>
+</defs></svg>
 <header class="top">
-  <div class="brand"><span class="logo">☀</span> solardash</div>
+  <div class="brand"><svg class="logo ic"><use href="#i-sun"/></svg> solardash</div>
   <nav class="desktop-nav" id="nav-desktop"></nav>
   <div class="top-right">
     <label class="occ"><span class="sr">Cabin</span><select id="occ-select" aria-label="Cabin occupancy"></select></label>
@@ -51,19 +59,17 @@
   </div>
 
   <div class="card flow-card">
-    <svg class="flow" viewBox="0 0 360 230" id="flow-svg" aria-label="power flow">
-      <g class="flow-lines">
-        <path id="fl-pv" class="fl" d="M70 60 C 120 60, 140 115, 180 115"/>
-        <path id="fl-gen" class="fl" d="M290 60 C 240 60, 220 115, 180 115"/>
-        <path id="fl-batt" class="fl" d="M180 185 C 180 160, 180 140, 180 115"/>
-      </g>
-      <g class="node" transform="translate(70,60)"><circle r="34"/><text class="ni" y="-6">☀</text><text class="nv" id="fn-pv" y="18">–</text></g>
-      <g class="node" transform="translate(290,60)"><circle r="34"/><text class="ni" y="-6">⚡</text><text class="nv" id="fn-gen" y="18">–</text></g>
-      <g class="node center" transform="translate(180,115)"><circle r="40"/><text class="ni" y="-8">⌂</text><text class="nv" id="fn-load" y="16">–</text></g>
-      <g class="node" transform="translate(180,185)"><circle r="34"/><text class="ni" y="-6">▮</text><text class="nv" id="fn-batt" y="18">–</text></g>
-      <text class="nl" x="70" y="108">solar</text>
-      <text class="nl" x="290" y="108" id="fn-gen-label">generator</text>
-      <text class="nl" x="180" y="226" id="fn-batt-label">battery</text>
+    <svg class="flow" viewBox="0 0 360 284" id="flow-svg" aria-label="power flow">
+      <path id="fl-pv" class="fl" d="M92 72 Q 128 86 142 104"/>
+      <path id="fl-gen" class="fl" d="M268 72 Q 232 86 218 104"/>
+      <path id="fl-batt" class="fl" d="M180 172 V 192"/>
+      <g class="node n-pv" transform="translate(62,58)"><circle r="36"/><use href="#i-sun" x="-10" y="-25" width="20" height="20"/><text class="nv" id="fn-pv" y="15">–</text></g>
+      <g class="node n-gen" transform="translate(298,58)"><circle r="36"/><use href="#i-bolt" x="-10" y="-25" width="20" height="20"/><text class="nv" id="fn-gen" y="15">–</text></g>
+      <g class="node n-home" transform="translate(180,126)"><circle r="46"/><use href="#i-home" x="-12" y="-31" width="24" height="24"/><text class="nv big" id="fn-load" y="17">–</text></g>
+      <g class="node n-batt" transform="translate(180,228)"><circle r="36"/><use href="#i-battery" x="-11" y="-26" width="22" height="22"/><text class="nv" id="fn-batt" y="15">–</text></g>
+      <text class="nl" x="62" y="112">solar</text>
+      <text class="nl" x="298" y="112" id="fn-gen-label">generator</text>
+      <text class="nl" x="180" y="280" id="fn-batt-label">battery</text>
     </svg>
   </div>
 
