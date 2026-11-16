@@ -367,6 +367,11 @@
 
   // ---------- setup ----------
   const SETUP = {
+    inverter: { title: "Inverter (EG4 6000XP)", fields: {
+      enabled: ["Enabled"], port: ["Serial port", "RS485 to the inverter's dongle/INV485 port"], baud: ["Baud", "19200 for the 6000XP"], unit: ["Modbus unit ID", "usually 1"],
+      name: ["Name"], poll_interval: ["Poll interval (s)"], settings_poll_interval: ["Settings re-read (s)"], timeout: ["Timeout (s)"],
+      allow_writes: ["Allow changing inverter settings from the app", "leave off until the readings match the inverter's screen"] } },
+    batteries: { title: "Batteries (JBD / Eco-Worthy, one port each)" },
     weather: { title: "Location & weather", fields: {
       latitude: ["Latitude", "cabin, decimal degrees (needed for any forecast)"], longitude: ["Longitude", "negative for west"],
       openmeteo_enabled: ["Open-Meteo irradiance forecast", "free, no key"], openmeteo_days: ["Open-Meteo days", "1–16"], openmeteo_interval: ["Open-Meteo refresh (s)"],
@@ -388,8 +393,26 @@
     const el = $("#setup"); el.innerHTML = "";
     for (const [sec, meta] of Object.entries(SETUP)) {
       const s = d.sections[sec]; if (!s) continue;
-      const det = document.createElement("details"); det.className = "sgroup"; det.innerHTML = `<summary>${meta.title}</summary>`;
+      const det = document.createElement("details"); det.className = "sgroup"; if (sec === "inverter") det.open = true; det.innerHTML = `<summary>${meta.title}</summary>`;
       const form = document.createElement("div"); form.className = "setup-form";
+      if (sec === "batteries") {
+        form.innerHTML = `<div class="gen-edit" id="bat-edit"></div><div class="setup-actions"><button class="btn" id="bat-scan">Scan ports</button><button class="btn" id="bat-add">+ Add battery</button><button class="btn primary" data-save="batteries">Save</button></div><div class="muted small" id="port-scan" style="grid-column:1/-1"></div>`;
+        det.appendChild(form); el.appendChild(det);
+        const box = form.querySelector("#bat-edit");
+        const row = (b = {}) => { const r = document.createElement("div"); r.className = "gen-row"; r.innerHTML = `
+          <div class="field"><label>Name</label><input data-k="name" value="${b.name || ""}"></div>
+          <div class="field"><label>Serial port</label><input data-k="port" list="port-list" value="${b.port || ""}" placeholder="/dev/ttyACM1"></div>
+          <div class="field"><label>Capacity (Ah)</label><input data-k="capacity_ah" type="number" inputmode="decimal" value="${b.capacity_ah ?? 100}"></div>
+          <div class="field check"><input data-k="enabled" type="checkbox" ${b.enabled !== false ? "checked" : ""}><label>Enabled</label></div><button class="btn rm">✕</button>`;
+          r.querySelector(".rm").addEventListener("click", () => r.remove()); box.appendChild(r); };
+        s.values.forEach(row); form.querySelector("#bat-add").addEventListener("click", () => row({ name: `Battery ${box.children.length + 1}`, port: "" }));
+        form.querySelector("#bat-scan").addEventListener("click", scanPorts);
+        form.querySelector("[data-save]").addEventListener("click", async () => {
+          const values = [...box.querySelectorAll(".gen-row")].map((r) => { const o = {}; r.querySelectorAll("input").forEach((i) => { o[i.dataset.k] = i.type === "checkbox" ? i.checked : i.type === "number" ? Number(i.value) : i.value.trim(); }); return o; });
+          saveSetup("batteries", values);
+        });
+        continue;
+      }
       if (sec === "generators") {
         form.innerHTML = `<div class="gen-edit" id="gen-edit"></div><div class="setup-actions"><button class="btn" id="gen-add">+ Add generator</button><button class="btn primary" data-save="generators">Save</button></div>`;
         det.appendChild(form); el.appendChild(det);
@@ -412,7 +435,8 @@
         const v = s.values[key], kind = kinds[key] || "text", id = `su-${sec}-${key}`;
         const f = document.createElement("div"); f.className = "field" + (kind === "bool" ? " check" : "");
         const lab = `<label for="${id}">${label[0]}${label[1] ? ` <small>· ${label[1]}</small>` : ""}</label>`;
-        if (kind === "bool") f.innerHTML = `<input type="checkbox" id="${id}" ${v ? "checked" : ""}>${lab}`;
+        if (key === "port") f.innerHTML = `${lab}<input id="${id}" list="port-list" value="${v ?? ""}" placeholder="/dev/ttyACM0">`;
+        else if (kind === "bool") f.innerHTML = `<input type="checkbox" id="${id}" ${v ? "checked" : ""}>${lab}`;
         else if (kind === "password") f.innerHTML = `${lab}<input type="password" id="${id}" value="" placeholder="${v ? "•••••• (set)" : "not set"}" autocomplete="off">`;
         else if (kind === "list") f.innerHTML = `${lab}<input id="${id}" value="${(v || []).join(", ")}">`;
         else if (kind === "number") f.innerHTML = `${lab}<input type="number" inputmode="decimal" step="any" id="${id}" value="${v ?? ""}">`;
@@ -435,11 +459,20 @@
       form.appendChild(act); det.appendChild(form); el.appendChild(det);
     }
   }
+  async function scanPorts() {
+    const out = $("#port-scan"); if (!out) return; out.textContent = "scanning…";
+    try {
+      const d = await (await fetch("/api/setup/ports")).json();
+      let dl = document.getElementById("port-list"); if (!dl) { dl = document.createElement("datalist"); dl.id = "port-list"; document.body.appendChild(dl); }
+      dl.innerHTML = d.ports.filter((p) => p.device).map((p) => `<option value="${p.device}">`).join("");
+      out.innerHTML = d.ports.length ? "Found: " + d.ports.map((p) => `<code>${p.device}</code>${p.description ? " " + p.description : ""}${p.used_by ? ` → ${p.used_by}` : ""}`).join(" · ") : "No serial ports visible. Is the adapter plugged in and /dev mapped into the container?";
+    } catch (e) { out.textContent = "scan failed"; }
+  }
   async function saveSetup(section, values) {
     const r = await fetch("/api/setup", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ section, values }) });
     const d = await r.json();
     toast(r.ok ? `Saved · ${d.applied}` : `Not saved: ${d.detail}`, 4000);
-    if (r.ok) { loadSetup(); if (section !== "mqtt") setTimeout(loadForecast, 2500); }
+    if (r.ok) { loadSetup(); if (section === "inverter" || section === "batteries") setTimeout(renderSystem, 3000); else if (section !== "mqtt") setTimeout(loadForecast, 2500); }
   }
 
   // ---------- system ----------
@@ -457,7 +490,7 @@
     kv($("#cv"), [["Mode", cv.mode], ["Charger polling", cv.charger_online ? "yes" : "no"], ["Polls / replies", `${cv.poll_count} / ${cv.reply_count}`], ["SOC presented", cv.presented_soc != null ? cv.presented_soc + " %" : null], ["Derived output", fmtW(tot.chargeverter_power)]]);
   }
   async function loadSystem() {
-    renderSystem(); loadSetup();
+    renderSystem(); loadSetup().then(scanPorts);
     const ev = await (await fetch("/api/events?limit=60")).json();
     $("#events").innerHTML = ev.map((e) => `<div><span class="ts">${new Date(e.ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span><span><b>${e.source}</b> ${e.message}</span></div>`).join("") || '<div class="muted">no events</div>';
     const st = await (await fetch("/api/history/stats")).json();

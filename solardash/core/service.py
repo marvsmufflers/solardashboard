@@ -77,18 +77,30 @@ class Service:
         cfg = self.cfg
         world = None
         if cfg.simulate:
-            from ..devices.simulated import (
-                SimulatedBatteryLink,
-                SimulatedChargeverterLink,
-                SimulatedInverterLink,
-                SimWorld,
-            )
+            from ..devices.simulated import SimWorld
 
             world = SimWorld(packs=max(1, len(cfg.batteries)))
             log.warning("SIMULATION MODE: no real hardware is being read")
+        self._world = world
+        self._build_devices()
+        self._build_weather()
+        self._build_mqtt()
+
+    def _build_devices(self) -> None:
+        cfg = self.cfg
+        world = self._world
+        if world is not None:
+            from ..devices.simulated import SimulatedBatteryLink, SimulatedChargeverterLink, SimulatedInverterLink
+        for k in [k for k in self.state.devices if k.startswith(("inverter:", "battery:", "chargeverter:"))]:
+            self.state.devices.pop(k, None)
+        self.inverter = None
+        self.batteries = []
+        self.chargeverter = None
         if cfg.inverter.enabled:
             link = SimulatedInverterLink(world, cfg.inverter.unit) if world else None
             self.inverter = InverterPoller(cfg.inverter, self.state, link=link)
+        self.state.batteries.clear()
+        self.state.battery_updated.clear()
         for i, b in enumerate(cfg.batteries, 1):
             if not b.enabled:
                 continue
@@ -97,9 +109,6 @@ class Service:
         if cfg.chargeverter.enabled and cfg.chargeverter.mode in ("sniff", "emulate"):
             link = SimulatedChargeverterLink(world, with_battery=(cfg.chargeverter.mode == "sniff")) if world else None
             self.chargeverter = ChargeverterTask(cfg.chargeverter, self.state, link=link)
-        self._world = world
-        self._build_weather()
-        self._build_mqtt()
 
     def _build_weather(self) -> None:
         cfg = self.cfg
@@ -144,17 +153,37 @@ class Service:
 
     # -- lifecycle -----------------------------------------------------------------
     async def start(self) -> None:
-        if self.inverter:
-            self._tasks.append(asyncio.create_task(self.inverter.run(), name="inverter"))
-        for b in self.batteries:
-            self._tasks.append(asyncio.create_task(b.run(), name=f"battery{b.index}"))
-        if self.chargeverter:
-            self._tasks.append(asyncio.create_task(self.chargeverter.run(), name="chargeverter"))
+        self._start_device_tasks()
         self._start_weather_tasks()
         self._start_mqtt_task()
         self._tasks.append(asyncio.create_task(self._derive_loop(), name="derive"))
         self._tasks.append(asyncio.create_task(self._sample_loop(), name="sample"))
         self.store.add_event("info", "service", "solardash started" + (" (simulation)" if self.cfg.simulate else ""))
+
+    def _start_device_tasks(self) -> None:
+        if self.inverter:
+            self._named["inverter"] = asyncio.create_task(self.inverter.run(), name="inverter")
+        for b in self.batteries:
+            self._named[f"battery{b.index}"] = asyncio.create_task(b.run(), name=f"battery{b.index}")
+        if self.chargeverter:
+            self._named["chargeverter"] = asyncio.create_task(self.chargeverter.run(), name="chargeverter")
+
+    async def _stop_device_tasks(self) -> None:
+        names = [n for n in self._named if n == "inverter" or n.startswith("battery") or n == "chargeverter"]
+        for p in ([self.inverter] if self.inverter else []) + list(self.batteries) + ([self.chargeverter] if self.chargeverter else []):
+            p.stop()
+        for n in names:
+            t = self._named.pop(n)
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        for p in ([self.inverter] if self.inverter else []) + list(self.batteries):
+            try:
+                p.link.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _start_weather_tasks(self) -> None:
         if self.weather:
@@ -182,6 +211,11 @@ class Service:
 
     async def reconfigure(self, section: str) -> str:
         """Apply a changed config section live. Returns what was restarted."""
+        if section in ("inverter", "batteries"):
+            await self._stop_device_tasks()
+            self._build_devices()
+            self._start_device_tasks()
+            return "serial pollers restarted"
         if section in ("weather", "planner", "occupancy"):
             await self._stop_named("weather", "forecast")
             self._build_weather()

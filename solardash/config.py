@@ -194,6 +194,8 @@ def _build(cls, data: dict[str, Any] | None):
 # ---------------------------------------------------------------------------
 
 OVERRIDABLE_SECTIONS: dict[str, Any] = {
+    "inverter": InverterConfig,
+    "batteries": BatteryConfig,  # list section
     "weather": WeatherConfig,
     "planner": PlannerConfig,
     "occupancy": OccupancyConfig,
@@ -285,6 +287,11 @@ def _check_ranges(section: str, obj) -> None:
             raise ValueError("default mode must be one of the modes")
     if section == "mqtt" and not 1 <= obj.port <= 65535:
         raise ValueError("port must be 1-65535")
+    if section == "inverter":
+        if not obj.port.strip():
+            raise ValueError("inverter port is required")
+        if not 0 <= obj.unit <= 247 or obj.baud not in (9600, 19200, 38400, 57600, 115200):
+            raise ValueError("unit must be 0-247 and baud one of 9600/19200/38400/57600/115200")
 
 
 def build_section(section: str, values: Any):
@@ -300,6 +307,14 @@ def build_section(section: str, values: Any):
         if any(not n for n in names) or len(set(names)) != len(names):
             raise ValueError("generator names must be unique and non-empty")
         return gens
+    if section == "batteries":
+        if not isinstance(values, list):
+            raise ValueError("batteries must be a list")
+        bats = [_build(BatteryConfig, _check_types(BatteryConfig, b)) for b in values]
+        ports = [b.port.strip() for b in bats if b.enabled]
+        if any(not p for p in ports) or len(set(ports)) != len(ports):
+            raise ValueError("each enabled battery needs its own serial port")
+        return bats
     if not isinstance(values, dict):
         raise ValueError(f"{section} must be an object")
     obj = _build(cls, _check_types(cls, values))
@@ -314,6 +329,9 @@ def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
         if section == "generators":
             cfg.generators = build_section(section, values)
             continue
+        if section == "batteries":
+            cfg.batteries = build_section(section, values)
+            continue
         current = asdict(getattr(cfg, section))
         merged = {**current, **{k: v for k, v in values.items() if k in current}}
         setattr(cfg, section, build_section(section, merged))
@@ -323,6 +341,8 @@ def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
 def section_values(cfg: "Config", section: str, mask_secrets: bool = True) -> Any:
     if section == "generators":
         return [asdict(g) for g in cfg.generators]
+    if section == "batteries":
+        return [asdict(b) for b in cfg.batteries]
     d = asdict(getattr(cfg, section))
     if mask_secrets:
         for (sec, key) in SECRET_FIELDS:
@@ -381,4 +401,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         cfg.log_level = os.environ["SOLARDASH_LOG_LEVEL"]
     if cfg.simulate and not cfg.batteries:
         cfg.batteries = [BatteryConfig(name=f"Battery {i}", port=f"sim{i}") for i in (1, 2, 3)]
+    elif "batteries" not in raw and "batteries" not in load_overrides(overrides_path(cfg)):
+        # no config at all: assume the Solar Assistant layout (inverter on ACM0, three packs after it)
+        cfg.batteries = [BatteryConfig(name=f"Battery {i}", port=f"/dev/ttyACM{i}") for i in (1, 2, 3)]
     return cfg

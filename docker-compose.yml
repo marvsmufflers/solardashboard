@@ -1,41 +1,33 @@
-# solardash on a Synology (Container Manager) or any Docker host. No SSH needed:
-#   1. In File Station make a folder (e.g. docker/solardash) and put this file,
-#      config.yaml (copy of config.example.yaml, edited) and an empty "data"
-#      folder in it.
-#   2. Container Manager -> Project -> Create -> pick that folder -> Start.
-#   3. Update later: Container Manager -> Image -> solardash -> Update, then
-#      Project -> solardash -> Action -> Restart. (Or Project -> Build.)
-# Find your serial adapters afterwards on the dashboard's System tab.
+# solardash — the only file you need.
+#
+#   1. File Station: make a folder (e.g. docker/solardash) and put this file in it.
+#   2. Container Manager -> Project -> Create -> choose that folder -> Start.
+#   3. Open http://<nas-ip>:8080 -> System -> Setup: pick the serial ports,
+#      enter your coordinates, and (optionally) the weather key, MQTT, password.
+#
+#   Update: Container Manager -> Image -> solardash -> Update, then
+#           Project -> solardash -> Action -> Restart.
+#
+# Everything you set on the Setup page is kept in the "solardash-data" volume,
+# so updates never lose it. (A config.yaml is optional; see README.)
 services:
   solardash:
-    image: ghcr.io/marvsmufflers/solardash:latest   # built automatically from GitHub
+    image: ghcr.io/marvsmufflers/solardash:latest
     pull_policy: always
-    # To build from source instead, remove the image line and uncomment:
-    # build: .
     container_name: solardash
     restart: unless-stopped
     ports:
-      - "8080:8080"            # LAN access; the tunnel reaches it on the compose network
+      - "8080:8080"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./data:/app/data      # history database and Setup-page overrides
-    # Serial adapters. Names can shift after a USB re-enumeration; the app
-    # reopens them, but if the order changes edit config.yaml.
-    devices:
-      - /dev/ttyACM0:/dev/ttyACM0
-      - /dev/ttyACM1:/dev/ttyACM1
-      - /dev/ttyACM2:/dev/ttyACM2
-      - /dev/ttyACM3:/dev/ttyACM3
+      - solardash-data:/app/data
+      - /dev:/dev                   # all USB serial adapters, hot-plug safe
+    privileged: true                # needed on Synology to open the adapters
     environment:
       - TZ=America/Los_Angeles
-      - SOLARDASH_LOG_LEVEL=INFO
-      - SOLARDASH_PASSWORD=          # optional dashboard login (second layer behind Cloudflare Access)
-      - SOLARDASH_WU_API_KEY=        # or set it on the Setup page
-      # - SOLARDASH_SIMULATE=true    # run without hardware
+      - SOLARDASH_PASSWORD=         # optional login for the dashboard
 
-  # Cloudflare Tunnel connector. Paste the tunnel token from Zero Trust ->
-  # Networks -> Tunnels. Delete this whole service if you run the tunnel some
-  # other way (e.g. its own container already set up in Container Manager).
+  # Cloudflare Tunnel (remote access). Paste your tunnel token after the "=".
+  # Already running the tunnel in its own container? Delete this whole block.
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: solardash-tunnel
@@ -45,3 +37,6 @@ services:
       - TUNNEL_TOKEN=
     depends_on:
       - solardash
+
+volumes:
+  solardash-data:

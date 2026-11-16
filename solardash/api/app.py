@@ -195,6 +195,34 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
                          for s in OVERRIDABLE_SECTIONS},
         }
 
+    @app.get("/api/setup/ports")
+    async def api_setup_ports():
+        """Serial ports visible inside the container, and which config entry uses each."""
+        def scan():
+            try:
+                from serial.tools import list_ports
+
+                found = [{"device": p.device, "description": p.description, "hwid": p.hwid, "serial": p.serial_number}
+                         for p in sorted(list_ports.comports(), key=lambda x: x.device)]
+            except Exception as e:  # noqa: BLE001
+                found = [{"error": str(e)}]
+            import glob
+
+            for dev in sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/serial/by-id/*"))):
+                if not any(f.get("device") == dev for f in found):
+                    found.append({"device": dev, "description": "", "hwid": "", "serial": None})
+            return found
+        ports = await asyncio.to_thread(scan)
+        used = {cfg.inverter.port: cfg.inverter.name}
+        for b in cfg.batteries:
+            if b.enabled:
+                used[b.port] = b.name
+        if cfg.chargeverter.enabled and cfg.chargeverter.mode != "off":
+            used[cfg.chargeverter.port] = cfg.chargeverter.name
+        for p in ports:
+            p["used_by"] = used.get(p.get("device"))
+        return {"ports": ports, "simulate": cfg.simulate}
+
     @app.put("/api/setup")
     async def api_setup_write(body: SetupWrite):
         if body.section not in OVERRIDABLE_SECTIONS:

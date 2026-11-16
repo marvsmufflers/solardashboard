@@ -160,7 +160,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .field { display: grid; gap: 3px; }
 .field label { font-size: 12px; color: var(--muted); }
 .field label small { color: var(--muted); opacity: .8; }
-.field input, .field select { width: 100%; padding: 8px 10px; border-radius: 10px; }
+.field input, .field select, .setting .ctl input { width: 100%; padding: 9px 11px; border-radius: 10px; -webkit-appearance: none; appearance: none; background: var(--card-2); color: var(--text); border: 1px solid var(--line); font: inherit; font-size: 16px; }
+.field input:focus, .setting .ctl input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-color: var(--accent); }
 .field.check { grid-template-columns: auto 1fr; align-items: center; gap: 10px; }
 .field.check input { width: 20px; height: 20px; accent-color: var(--accent); }
 .setup-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }

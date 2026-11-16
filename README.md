@@ -42,30 +42,27 @@ solardash serve --simulate --port 8080
 
 Open http://localhost:8080.
 
-## Quick start (real hardware, Synology Container Manager, no SSH)
+## Install on a Synology (Container Manager, nothing else)
 
-A ready-built image is published to GitHub Container Registry on every commit, so the NAS never
-builds anything.
+1. **File Station:** create a folder, for example `docker/solardash`, and put one file in it:
+   [`docker-compose.yml`](docker-compose.yml) from this repo (open it on GitHub, *Download raw file*).
+   If you use Cloudflare Tunnel, open the file in a text editor and paste your tunnel token after
+   `TUNNEL_TOKEN=`; if the tunnel already runs in its own container, delete that block.
+2. **Container Manager → Project → Create:** name `solardash`, path = that folder, Start.
+3. Open `http://<nas-ip>:8080` → **System** → **Setup**. Press *Scan ports*, pick the inverter's port
+   and one port per battery (the Solar Assistant layout, inverter on `ttyACM0` and batteries on
+   `ttyACM1`–`3`, is pre-filled), enter your coordinates, save. Weather key, planner limits,
+   generators and MQTT live on the same page.
 
-1. **File Station:** create a shared folder path such as `docker/solardash`. Put three things in it:
-   `docker-compose.yml` from this repo, `config.yaml` (download `config.example.yaml`, rename it,
-   and set the four serial ports and your coordinates), and an empty folder named `data`.
-2. **Container Manager → Project → Create.** Project name `solardash`, path = that folder, it picks
-   up `docker-compose.yml`. Before starting, fill in `TUNNEL_TOKEN` (Cloudflare) and, if you want it,
-   `SOLARDASH_PASSWORD` in the YAML editor, or delete the `cloudflared` service if your tunnel already
-   runs elsewhere. Start the project.
-3. Open `http://<nas-ip>:8080`. The **System** tab shows which serial adapters answered; the **Setup**
-   card there is where weather, location, planner limits, generators and MQTT are configured.
-
-Stop the Solar Assistant container first: only one program can own a serial port.
+Stop the Solar Assistant container first: only one program can own a serial port. Everything you
+set is stored in the `solardash-data` volume and survives updates.
 
 **Updating:** Container Manager → **Image** → `ghcr.io/marvsmufflers/solardash` → *Update*, then
-**Project** → `solardash` → *Action* → *Restart*. Then re-add the pinned app on the phone if the
-look didn't change (Safari caches aggressively).
+**Project** → `solardash` → *Action* → *Restart*. If the phone still shows the old look, delete the
+pinned app and add it again (Safari caches it).
 
-If the image pull is refused, the GitHub package is still private: on GitHub open the repo →
-Packages → `solardash` → Package settings → *Change visibility* → Public (or add a GitHub token under
-Container Manager → Registry).
+A `config.yaml` (see `config.example.yaml`) is optional for advanced setups; mount it at
+`/app/config.yaml`. Setup-page values override it.
 
 ## Wiring summary
 
