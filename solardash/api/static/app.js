@@ -80,6 +80,13 @@
     setGauge(soc, floor);
     const bp = tot.battery_power;
     $("#h-soc-sub").textContent = bp == null ? "battery" : bp >= 20 ? `charging ${fmtW(bp)}` : bp <= -20 ? `discharging ${fmtW(-bp)}` : "idle";
+    // % per hour, like Solar Assistant: amps over amp-hours when the BMS gives both, else watts over kWh
+    let rate = null;
+    if (tot.battery_current != null && tot.battery_capacity_ah) rate = tot.battery_current / tot.battery_capacity_ah * 100;
+    else if (bp != null) rate = bp / (((state.forecast_summary?.params?.battery_kwh) || 15.36) * 1000) * 100;
+    const re = $("#h-soc-rate");
+    re.textContent = rate == null ? "" : `${rate >= 0 ? "+" : "−"}${Math.abs(rate).toFixed(1)} %/h`;
+    re.className = "gauge-rate " + (rate == null || Math.abs(rate) < 0.05 ? "" : rate > 0 ? "up" : "down");
     $("#h-batt").textContent = tot.battery_voltage != null ? `${tot.battery_voltage.toFixed(1)} V` : "–";
     $("#h-batt-sub").textContent = tot.battery_current != null ? `${tot.battery_current.toFixed(1)} A · ${fmt(tot.battery_temperature, 0, "°C")} · ${tot.battery_count ?? 0} packs` : (tot.battery_source === "inverter" ? "inverter estimate" : "no BMS data");
     // runway: time to 30 % at current rate (or to full)
