@@ -2,109 +2,146 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>solardash</title>
+<meta name="description" content="Off-grid cabin power: solar, battery, generator">
+<meta name="theme-color" content="#0b0f14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3f5f8" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="solardash">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/chart.umd.min.js"></script>
 </head>
 <body>
-<header>
-  <div class="brand">☀ solardash</div>
-  <nav>
-    <button data-tab="overview" class="active">Overview</button>
-    <button data-tab="batteries">Batteries</button>
-    <button data-tab="inverter">Inverter</button>
-    <button data-tab="forecast">Forecast</button>
-    <button data-tab="chargeverter">Chargeverter</button>
-    <button data-tab="settings">Settings</button>
-    <button data-tab="system">System</button>
-  </nav>
-  <label class="occ" id="occ-wrap" title="Cabin occupancy drives which load profile the planner uses">Cabin: <select id="occ-select"></select></label>
-  <div class="conn" id="conn">connecting…</div>
+<header class="top">
+  <div class="brand"><span class="logo">☀</span> solardash</div>
+  <nav class="desktop-nav" id="nav-desktop"></nav>
+  <div class="top-right">
+    <label class="occ"><span class="sr">Cabin</span><select id="occ-select" aria-label="Cabin occupancy"></select></label>
+    <span class="conn" id="conn" title="connection">●</span>
+  </div>
 </header>
 
-<main>
-<section id="tab-overview" class="tab active">
+<main id="main">
+
+<!-- ================= HOME ================= -->
+<section id="tab-home" class="tab active">
+  <div class="hero">
+    <div class="gauge-wrap">
+      <svg class="gauge" viewBox="0 0 200 200" aria-hidden="true">
+        <defs><linearGradient id="g-soc" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="var(--accent-2)"/><stop offset="1" stop-color="var(--accent)"/></linearGradient></defs>
+        <circle class="gauge-track" cx="100" cy="100" r="86"/>
+        <circle class="gauge-fill" id="gauge-fill" cx="100" cy="100" r="86"/>
+        <circle class="gauge-floor" id="gauge-floor" cx="100" cy="100" r="86"/>
+      </svg>
+      <div class="gauge-text">
+        <div class="gauge-value"><span id="h-soc">–</span><span class="unit">%</span></div>
+        <div class="gauge-sub" id="h-soc-sub">battery</div>
+      </div>
+    </div>
+    <div class="hero-side">
+      <div class="hero-stat"><div class="k">Battery</div><div class="v" id="h-batt">–</div><div class="s" id="h-batt-sub"></div></div>
+      <div class="hero-stat"><div class="k">Runway</div><div class="v" id="h-runway">–</div><div class="s" id="h-runway-sub"></div></div>
+    </div>
+  </div>
+
+  <div class="card flow-card">
+    <svg class="flow" viewBox="0 0 360 230" id="flow-svg" aria-label="power flow">
+      <g class="flow-lines">
+        <path id="fl-pv" class="fl" d="M70 60 C 120 60, 140 115, 180 115"/>
+        <path id="fl-gen" class="fl" d="M290 60 C 240 60, 220 115, 180 115"/>
+        <path id="fl-batt" class="fl" d="M180 185 C 180 160, 180 140, 180 115"/>
+      </g>
+      <g class="node" transform="translate(70,60)"><circle r="34"/><text class="ni" y="-6">☀</text><text class="nv" id="fn-pv" y="18">–</text></g>
+      <g class="node" transform="translate(290,60)"><circle r="34"/><text class="ni" y="-6">⚡</text><text class="nv" id="fn-gen" y="18">–</text></g>
+      <g class="node center" transform="translate(180,115)"><circle r="40"/><text class="ni" y="-8">⌂</text><text class="nv" id="fn-load" y="16">–</text></g>
+      <g class="node" transform="translate(180,185)"><circle r="34"/><text class="ni" y="-6">▮</text><text class="nv" id="fn-batt" y="18">–</text></g>
+      <text class="nl" x="70" y="108">solar</text>
+      <text class="nl" x="290" y="108" id="fn-gen-label">generator</text>
+      <text class="nl" x="180" y="226" id="fn-batt-label">battery</text>
+    </svg>
+  </div>
+
   <div class="tiles">
-    <div class="tile pv"><div class="label">Solar</div><div class="value" id="t-pv">–</div><div class="sub" id="t-pv-sub"></div></div>
-    <div class="tile load"><div class="label">Load</div><div class="value" id="t-load">–</div><div class="sub" id="t-load-sub"></div></div>
-    <div class="tile batt"><div class="label">Battery</div><div class="value" id="t-soc">–</div><div class="sub" id="t-batt-sub"></div><div class="bar"><div id="t-soc-bar"></div></div></div>
-    <div class="tile gen"><div class="label">Generator → Chargeverter</div><div class="value" id="t-gen">–</div><div class="sub" id="t-gen-sub"></div><div class="sub"><label>Cam switch: <select id="gen-select"></select></label></div></div>
-    <div class="tile cv"><div class="label">Chargeverter link</div><div class="value" id="t-cv">–</div><div class="sub" id="t-cv-sub"></div></div>
+    <div class="tile"><div class="k">Solar today</div><div class="v" id="t-pv-e">–</div><div class="s" id="t-pv-s"></div><canvas class="spark" id="sp-pv" height="34"></canvas></div>
+    <div class="tile"><div class="k">Load today</div><div class="v" id="t-load-e">–</div><div class="s" id="t-load-s"></div><canvas class="spark" id="sp-load" height="34"></canvas></div>
+    <div class="tile"><div class="k">Generator</div><div class="v" id="t-gen">–</div><div class="s" id="t-gen-s"></div></div>
+    <div class="tile"><div class="k">Weather</div><div class="v" id="t-wx">–</div><div class="s" id="t-wx-s"></div></div>
+  </div>
+
+  <div class="card plan-mini" id="plan-mini">
+    <div class="row"><span class="badge" id="pm-badge">plan</span><span class="pm-title" id="pm-title">–</span></div>
+    <div class="muted" id="pm-text"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Power</h2><div class="chips" id="ranges"><button data-range="6h">6h</button><button data-range="24h" class="active">24h</button><button data-range="7d">7d</button><button data-range="30d">30d</button></div></div>
+    <div class="chart"><canvas id="chart-power"></canvas></div>
+  </div>
+</section>
+
+<!-- ================= BATTERY ================= -->
+<section id="tab-battery" class="tab">
+  <div class="card">
+    <div class="card-head"><h2>Bank</h2><span class="badge" id="bank-badge"></span></div>
+    <div class="grid3" id="bank-stats"></div>
+  </div>
+  <div id="packs" class="packs"></div>
+  <div class="card"><h2>State of charge</h2><div class="chart"><canvas id="chart-soc"></canvas></div></div>
+  <div class="card"><h2>Pack temperatures &amp; cell spread</h2><div class="chart"><canvas id="chart-batt"></canvas></div></div>
+</section>
+
+<!-- ================= GENERATOR ================= -->
+<section id="tab-generator" class="tab">
+  <div class="card plan-card">
+    <div class="card-head"><h2>Plan</h2><span class="badge" id="plan-badge">–</span></div>
+    <p class="lead" id="plan-reason">–</p>
+    <div class="grid3" id="plan-kv"></div>
   </div>
   <div class="card">
-    <div class="card-head"><h2>Power</h2>
-      <div class="ranges" id="ranges">
-        <button data-range="1h">1h</button><button data-range="6h">6h</button><button data-range="24h" class="active">24h</button><button data-range="7d">7d</button><button data-range="30d">30d</button>
-      </div></div>
-    <div class="chart "><canvas id="chart-power"></canvas></div>
+    <div class="card-head"><h2>Next 72 h</h2><div><span class="badge subtle" id="forecast-source"></span> <button class="btn" id="forecast-recompute">↻</button></div></div>
+    <div class="chart tall"><canvas id="chart-forecast"></canvas></div>
   </div>
-  <div class="two">
-    <div class="card"><h2>State of charge</h2><div class="chart tall"><canvas id="chart-soc"></canvas></div></div>
-    <div class="card"><h2>Energy today</h2><div id="energy-today" class="kv"></div><h2 style="margin-top:14px">Generator run hours</h2><div id="gen-hours" class="kv"></div></div>
+  <div class="card"><h2>Outlook</h2><div id="forecast-days" class="days"></div></div>
+  <div class="card">
+    <div class="card-head"><h2>Generators</h2><label class="inline">Cam switch <select id="gen-select"></select></label></div>
+    <div id="gen-list" class="gen-list"></div>
   </div>
+  <div class="card"><div class="card-head"><h2>Scorecard</h2><span class="muted small">last 14 days</span></div><div class="scroll-x" id="scorecard"></div></div>
+  <div class="card"><h2>PV model</h2><div class="grid3" id="pv-model"></div></div>
 </section>
 
-<section id="tab-forecast" class="tab">
-  <div class="card" id="plan-card"><div class="card-head"><h2>Generator plan</h2><span id="plan-badge" class="pill"></span></div>
-    <p id="plan-reason" class="muted"></p><div id="plan-kv" class="kv"></div></div>
-  <div class="card"><div class="card-head"><h2>Next 72 hours</h2><div><span id="forecast-source" class="pill"></span> <button id="forecast-recompute">Recompute</button></div></div>
-    <p class="muted">Predicted solar (bars), forecast battery SOC without the generator (dashed) and with the planned run (solid).</p>
-    <div class="chart"><canvas id="chart-forecast"></canvas></div></div>
-  <div class="two">
-    <div class="card"><h2>Weather station</h2><div id="weather-now" class="kv"></div></div>
-    <div class="card"><h2>PV model</h2><div id="pv-model" class="kv"></div></div>
-  </div>
-  <div class="card"><h2>Daily outlook</h2><div id="forecast-days"></div></div>
-  <div class="card"><h2>Generator scorecard (last 14 days)</h2>
-    <p class="muted">Is the strategy paying off? Fewer starts, more of the run at full Chargeverter current, no hours at the floor, and little curtailed solar (a full bank on a sunny morning means last night's run was too long).</p>
-    <div id="scorecard"></div></div>
-</section>
-
-<section id="tab-batteries" class="tab">
-  <div class="card"><h2>Bank</h2><div id="bank" class="kv"></div></div>
-  <div id="packs" class="packs"></div>
-  <div class="card"><h2>Pack temperatures &amp; cell spread (24h)</h2><div class="chart tall"><canvas id="chart-batt"></canvas></div></div>
-</section>
-
+<!-- ================= INVERTER ================= -->
 <section id="tab-inverter" class="tab">
-  <div class="card"><h2>Live</h2><div id="inv-live" class="kv"></div></div>
-  <div class="two">
-    <div class="card"><h2>Energy</h2><div id="inv-energy" class="kv"></div></div>
-    <div class="card"><h2>BMS as seen by inverter</h2><div id="inv-bms" class="kv"></div></div>
+  <div class="card"><div class="card-head"><h2>Live</h2><span class="badge" id="inv-status"></span></div><div class="grid3" id="inv-live"></div></div>
+  <div class="card"><h2>Energy</h2><div class="grid3" id="inv-energy"></div></div>
+  <div class="card"><h2>BMS as seen by inverter</h2><div class="grid3" id="inv-bms"></div></div>
+  <div class="card">
+    <div class="card-head"><h2>Settings</h2><div><span class="badge subtle" id="settings-mode"></span> <button class="btn" id="settings-refresh">↻</button></div></div>
+    <p class="muted small">Writes are range-checked and verified. Enable with <code>inverter.allow_writes: true</code>.</p>
+    <div id="settings"></div>
   </div>
-  <div class="card"><h2>Diagnostics</h2><div id="inv-diag" class="kv"></div></div>
+  <div class="card"><h2>Diagnostics</h2><div class="grid3" id="inv-diag"></div></div>
 </section>
 
-<section id="tab-chargeverter" class="tab">
-  <div class="card"><h2>Chargeverter GC</h2>
-    <p class="muted">The Chargeverter cannot be polled. It is a Modbus master that asks "the battery" for SOC every half second
-      (<code>01 03 00 13 00 11</code> at 9600 baud on RJ45 pins 1/2). solardash can listen to that bus, and in
-      <b>emulate</b> mode answer it with the real pack data so the charger stops showing LOST and can start/stop the generator on SOC.</p>
-    <div id="cv" class="kv"></div></div>
-  <div class="card"><h2>Derived output</h2>
-    <p class="muted">Chargeverter DC power = (sum of pack currents × voltage from the BMSs) − (inverter battery charge − discharge power).
-      Below the configured threshold it is reported as 0.</p>
-    <div class="chart "><canvas id="chart-cv"></canvas></div></div>
-</section>
-
-<section id="tab-settings" class="tab">
-  <div class="card"><div class="card-head"><h2>Inverter settings</h2><div><span id="settings-mode" class="pill"></span> <button id="settings-refresh">Re-read</button></div></div>
-    <p class="muted">Values are read from the inverter's holding registers. Writes are range-checked, applied with
-      read-modify-write for bit fields, and read back for verification. They are only enabled when
-      <code>inverter.allow_writes: true</code> is set in the config file.</p>
-    <div id="settings"></div></div>
-</section>
-
+<!-- ================= SYSTEM ================= -->
 <section id="tab-system" class="tab">
-  <div class="card"><h2>Devices</h2><div id="devices"></div></div>
-  <div class="two">
-    <div class="card"><h2>Events</h2><div id="events" class="events"></div></div>
-    <div class="card"><h2>History database</h2><div id="dbstats" class="kv"></div></div>
-  </div>
+  <div class="card"><h2>Devices</h2><div id="devices" class="dev-list"></div></div>
+  <div class="card"><h2>Weather station</h2><div class="grid3" id="weather-now"></div></div>
+  <div class="card"><h2>Events</h2><div id="events" class="events"></div></div>
+  <div class="card"><h2>History database</h2><div class="grid3" id="dbstats"></div></div>
+  <div class="card" id="cv-card"><h2>Chargeverter link</h2><div class="grid3" id="cv"></div></div>
 </section>
+
 </main>
-<div id="toast"></div>
+
+<nav class="tabbar" id="tabbar"></nav>
+<div id="toast" role="status"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

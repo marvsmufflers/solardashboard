@@ -26,7 +26,12 @@ Chargeverter.
   Home Assistant discovery
 * Simulation mode and a serial probe tool, so you can try everything before touching hardware
 
-See [docs/DESIGN.md](docs/DESIGN.md) for protocol details, wiring and architecture.
+See [docs/DESIGN.md](docs/DESIGN.md) for protocol details, wiring and architecture, and
+[docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md) for the Home Assistant side.
+
+**On an iPhone:** open the dashboard in Safari, tap Share → *Add to Home Screen*. It installs as a
+full-screen app (dark or light with the system setting, bottom tab bar, safe-area aware) and
+reconnects to the live feed whenever it is brought to the front.
 
 ## Quick start (no hardware)
 

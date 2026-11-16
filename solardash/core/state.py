@@ -70,7 +70,7 @@ class SystemState:
             "chargeverter": copy.deepcopy(self.chargeverter),
             "total": copy.deepcopy(self.derived),
             "weather": copy.deepcopy(self.weather),
-            "forecast_summary": {k: self.forecast.get(k) for k in ("available", "updated", "days", "plan", "expected_now_kw", "actual_now_kw", "soc_now")}
+            "forecast_summary": {k: self.forecast.get(k) for k in ("available", "updated", "days", "plan", "expected_now_kw", "actual_now_kw", "soc_now", "params", "reason")}
             if self.forecast else {},
             "devices": {k: v.to_dict() for k, v in self.devices.items()},
         }
