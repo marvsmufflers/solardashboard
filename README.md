@@ -184,6 +184,28 @@ Chargeverter output while it is selected on the cam switch in the UI.
 | `GET /api/devices`, `GET /api/events`, `GET /api/chargeverter`, `GET /api/inverter/raw` | diagnostics |
 | `WS /ws` | pushes the snapshot about once a second |
 
+## Remote access
+
+solardash has an optional password (`web.password` or `SOLARDASH_PASSWORD`; `/login` sets a
+30-day cookie, scripts use `Authorization: Bearer <password>`), but it is designed to sit behind a
+proper gate rather than be exposed directly:
+
+**Cloudflare Tunnel + Access (recommended for sharing with the family).** No open ports, works
+behind Starlink/CGNAT, login enforced at Cloudflare's edge, free for up to 50 users.
+
+1. Cloudflare Zero Trust → Networks → Tunnels → create a tunnel; copy its token into `.env` as
+   `TUNNEL_TOKEN`.
+2. Add a public hostname (e.g. `solar.yourdomain.com`) with service `http://solardash:8080`.
+3. Access → Applications → add a self-hosted app for that hostname with a policy allowing your
+   family's e-mail addresses (one-time PIN or Google login).
+4. `docker compose --profile tunnel up -d`.
+
+Set `SOLARDASH_PASSWORD` too, so a misconfigured Access policy still does not expose the inverter
+settings. Home Assistant on the LAN is unaffected (MQTT, or REST with the bearer token).
+
+**Tailscale (simplest if it is only you).** Install the Tailscale package on the NAS and the app on
+the phone; browse to the NAS's tailnet address. Nothing is reachable from outside your devices.
+
 ## MQTT / Home Assistant
 
 With `mqtt.enabled: true` solardash publishes every value under `solar_assistant/<device>/<metric>/state`

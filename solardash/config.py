@@ -131,6 +131,9 @@ class HistoryConfig:
 class WebConfig:
     host: str = "0.0.0.0"
     port: int = 8080
+    # Optional password for the UI/API (or $SOLARDASH_PASSWORD). Empty = open.
+    # Use it as a second layer behind Cloudflare Access / Tailscale.
+    password: str = ""
 
 
 @dataclass
@@ -210,6 +213,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         cfg.simulate = os.environ["SOLARDASH_SIMULATE"].lower() in ("1", "true", "yes")
     if os.environ.get("SOLARDASH_PORT"):
         cfg.web.port = int(os.environ["SOLARDASH_PORT"])
+    if os.environ.get("SOLARDASH_PASSWORD"):
+        cfg.web.password = os.environ["SOLARDASH_PASSWORD"]
     if os.environ.get("SOLARDASH_DB"):
         cfg.history.path = os.environ["SOLARDASH_DB"]
     if os.environ.get("SOLARDASH_WU_API_KEY"):

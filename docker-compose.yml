@@ -1,6 +1,7 @@
 # Synology / generic Docker deployment.
-#   1. cp config.example.yaml config.yaml  and edit ports
-#   2. docker compose up -d
+#   1. cp config.example.yaml config.yaml   and edit ports, coordinates, keys
+#   2. cp .env.example .env                 and fill in TUNNEL_TOKEN (optional) / SOLARDASH_PASSWORD
+#   3. docker compose up -d
 # Find your adapters with:  docker compose run --rm solardash solardash probe list
 services:
   solardash:
@@ -9,7 +10,7 @@ services:
     container_name: solardash
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8080"            # LAN access; the tunnel reaches it on the compose network
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
@@ -25,7 +26,24 @@ services:
     #   - /dev/serial:/dev/serial
     #   (requires `privileged: true` on most Synology DSM versions)
     environment:
-      - TZ=America/Los_Angeles
+      - TZ=${TZ:-America/Los_Angeles}
       - SOLARDASH_LOG_LEVEL=INFO
-    # Uncomment to run without hardware:
-    #   - SOLARDASH_SIMULATE=true
+      - SOLARDASH_PASSWORD=${SOLARDASH_PASSWORD:-}   # optional second layer behind Access
+      - SOLARDASH_WU_API_KEY=${SOLARDASH_WU_API_KEY:-}
+      # - SOLARDASH_SIMULATE=true                    # run without hardware
+
+  # Remote access: Cloudflare Tunnel. Create the tunnel in Zero Trust ->
+  # Networks -> Tunnels, add a public hostname pointing at http://solardash:8080,
+  # put an Access policy on that hostname, and paste the tunnel token in .env.
+  # Nothing is opened on your router; the connector dials out (works behind
+  # Starlink / cellular CGNAT). Remove this service if you use Tailscale instead.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: solardash-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
+    depends_on:
+      - solardash
+    profiles: ["tunnel"]     # start with:  docker compose --profile tunnel up -d

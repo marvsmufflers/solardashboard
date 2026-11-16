@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from .. import __version__
 from ..config import Config
+from .auth import install_password_gate, websocket_allowed
 from ..core.service import Service
 from ..protocols import luxpower as lx
 from ..protocols.luxpower import SettingValueError
@@ -51,6 +52,10 @@ def sanitized_config(cfg: Config) -> dict:
     d = asdict(cfg)
     if d.get("mqtt"):
         d["mqtt"]["password"] = "***" if d["mqtt"].get("password") else ""
+    if d.get("web"):
+        d["web"]["password"] = "***" if d["web"].get("password") else ""
+    if d.get("weather"):
+        d["weather"]["api_key"] = "***" if d["weather"].get("api_key") else ""
     return d
 
 
@@ -67,6 +72,9 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
 
     app = FastAPI(title="solardash", version=__version__, lifespan=lifespan)
     app.state.service = svc
+    gate = install_password_gate(app, cfg.web.password) if cfg.web.password else None
+    if gate:
+        log.info("web: password protection enabled")
 
     # -- pages ---------------------------------------------------------------
     @app.get("/", include_in_schema=False)
@@ -242,6 +250,9 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
     # -- websocket -----------------------------------------------------------------
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket):
+        if not websocket_allowed(gate, ws.cookies, ws.headers):
+            await ws.close(code=4401)
+            return
         await ws.accept()
         q = svc.state.bus.subscribe()
         try:
