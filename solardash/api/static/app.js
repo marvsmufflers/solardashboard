@@ -183,12 +183,12 @@
     kv($("#inv-live"), [
       ["PV1", `${fmt(inv.pv1_voltage, 0, "V")} · ${fmtW(inv.pv1_power)}`], ["PV2", `${fmt(inv.pv2_voltage, 0, "V")} · ${fmtW(inv.pv2_power)}`], ["Battery (inverter)", `${fmt(inv.battery_voltage, 1, "V")} · ${inv.battery_soc ?? "–"} % · ${fmtW(inv.battery_power)}`],
       ["AC output", `${fmt(inv.eps_voltage, 0, "V")} ${fmt(inv.eps_frequency, 2, "Hz")} · ${fmtW(inv.eps_power)}`], ["L1 / L2", `${fmt(inv.eps_l1_voltage, 0, "V")} ${fmtW(inv.eps_l1_power)} · ${fmt(inv.eps_l2_voltage, 0, "V")} ${fmtW(inv.eps_l2_power)}`], ["Load", fmtW(inv.load_power)],
-      ["AC input (unused)", `${inv.ac_input_live ? "LIVE" : "dead"} · ${fmt(inv.ac_input_voltage, 0, "V")}`, inv.ac_input_live ? "warn" : ""], ["Temperatures", `in ${fT(inv.temperature_inner)} · rad ${fT(inv.temperature_radiator_1)} / ${fT(inv.temperature_radiator_2)}`],
+      ["Temperatures", `in ${fT(inv.temperature_inner)} · rad ${fT(inv.temperature_radiator_1)} / ${fT(inv.temperature_radiator_2)}`],
       ["Faults", (inv.faults || []).join(", ") || "none", (inv.faults || []).length ? "bad" : "ok"], ["Warnings", (inv.warnings || []).join(", ") || "none", (inv.warnings || []).length ? "warn" : ""],
     ]);
     kv($("#inv-energy"), [
       ["PV today / lifetime", `${fmt(inv.pv_energy_today, 1)} / ${fmt(inv.pv_energy_total, 0)} kWh`], ["Load today", fmt(inv.load_energy_today, 1, "kWh")], ["EPS today / lifetime", `${fmt(inv.eps_energy_today, 1)} / ${fmt(inv.eps_energy_total, 0)} kWh`],
-      ["Charged today / lifetime", `${fmt(inv.battery_charge_energy_today, 1)} / ${fmt(inv.battery_charge_energy_total, 0)} kWh`], ["Discharged today / lifetime", `${fmt(inv.battery_discharge_energy_today, 1)} / ${fmt(inv.battery_discharge_energy_total, 0)} kWh`], ["AC input today / lifetime", `${fmt(inv.ac_input_total_energy_today, 1)} / ${fmt(inv.ac_input_total_energy_total, 0)} kWh`],
+      ["Charged today / lifetime", `${fmt(inv.battery_charge_energy_today, 1)} / ${fmt(inv.battery_charge_energy_total, 0)} kWh`], ["Discharged today / lifetime", `${fmt(inv.battery_discharge_energy_today, 1)} / ${fmt(inv.battery_discharge_energy_total, 0)} kWh`],
     ]);
     kv($("#inv-bms"), [
       ["Packs / capacity", `${inv.battery_parallel_count ?? "–"} · ${fmt(inv.battery_capacity_ah, 0, "Ah")}`], ["Max charge / discharge", `${fmt(inv.bms_max_charge_current, 0)} / ${fmt(inv.bms_max_discharge_current, 0)} A`], ["Charge V ref / cut-off", `${fmt(inv.bms_charge_voltage_ref, 1)} / ${fmt(inv.bms_discharge_cutoff_voltage, 1)} V`],
