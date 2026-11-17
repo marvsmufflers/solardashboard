@@ -271,7 +271,13 @@ class MqttPublisher:
             return
         if msg.topic == f"{self.cfg.prefix}/occupancy/set" and self.on_occupancy is not None:
             try:
-                self.on_occupancy(payload.strip('"').lower())
+                v = payload.strip('"').strip().lower()
+                modes = self.occupancy_modes()
+                if len(modes) >= 2 and v in ("on", "true", "1", "home", "here"):
+                    v = modes[0]
+                elif len(modes) >= 2 and v in ("off", "false", "0", "away", "not_home"):
+                    v = modes[1]
+                self.on_occupancy(v)
             except Exception as e:  # noqa: BLE001
                 log.warning("mqtt: occupancy set failed: %s", e)
             return
@@ -365,27 +371,31 @@ class MqttPublisher:
             self._new_since_flush = True
         self._pub(topic, value)
 
-    def _discover_occupancy_select(self) -> None:
-        """Occupancy as a Home Assistant select entity (dropdown + automations)."""
-        topic = f"{self.cfg.prefix}/total/occupancy/state"
-        key = "select:" + topic
+    def _discover_occupancy_switch(self) -> None:
+        """Occupancy as a Home Assistant switch: on = here (first mode), off = away (second mode)."""
         modes = self.occupancy_modes()
-        if not self.cfg.ha_discovery or key in self._discovered or self._client is None or not modes:
+        if not self.cfg.ha_discovery or "switch:occupied" in self._discovered or self._client is None or len(modes) < 2:
             return
-        self._discovered.add(key)
+        self._discovered.add("switch:occupied")
+        self._raw_publish(f"{self.cfg.ha_prefix}/select/solardash_occupancy/config", "", retain=True)  # remove the old dropdown
         payload = {
-            "name": "Cabin occupancy", "unique_id": "solardash_occupancy", "object_id": "solardash_occupancy",
-            "state_topic": topic, "command_topic": f"{self.cfg.prefix}/occupancy/set", "options": modes,
+            "name": "Cabin occupied", "unique_id": "solardash_cabin_occupied", "object_id": "solardash_cabin_occupied",
+            "state_topic": f"{self.cfg.prefix}/total/occupied/state", "command_topic": f"{self.cfg.prefix}/occupancy/set",
+            "payload_on": "ON", "payload_off": "OFF", "state_on": "ON", "state_off": "OFF",
             "availability_topic": self.availability_topic, "icon": "mdi:home-account",
             "device": {"identifiers": ["solardash_total"], "name": "Totals", "manufacturer": "solardash", "model": "solardash"},
         }
-        self._raw_publish(f"{self.cfg.ha_prefix}/select/solardash_occupancy/config", json.dumps(payload), retain=True)
+        self._raw_publish(f"{self.cfg.ha_prefix}/switch/solardash_cabin_occupied/config", json.dumps(payload), retain=True)
 
     def occupancy_modes(self) -> list[str]:
         return list(getattr(self, "_occupancy_modes", []) or [])
 
     def publish_snapshot(self) -> None:
-        self._discover_occupancy_select()
+        self._discover_occupancy_switch()
+        modes = self.occupancy_modes()
+        occ = (self.state.derived or {}).get("occupancy")
+        if len(modes) >= 2 and occ in modes:
+            self._pub(f"{self.cfg.prefix}/total/occupied/state", "ON" if occ == modes[0] else "OFF")
         st = self.state
         inv = st.inverter
         if inv:
