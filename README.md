@@ -1,4 +1,8 @@
-# solardash
+# Watts the Forecast
+
+![Watts the Forecast](solardash/api/static/logo.webp)
+
+*(internal name: `solardash` — the Python package, Docker image and Home Assistant entity ids keep that name)*
 
 Local, self-hosted monitoring and control for an **off-grid cabin** built from an **EG4 6000XP**,
 **Eco-Worthy 48V 100Ah server-rack batteries** (JBD BMS), an **EG4 Chargeverter GC** and Honda

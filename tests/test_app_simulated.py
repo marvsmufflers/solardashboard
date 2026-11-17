@@ -130,7 +130,7 @@ async def test_full_stack(cfg):
             r = await c.get("/api/weather")
             assert r.json()["current"]["solar_radiation"] is not None
             r = await c.get("/")
-            assert r.status_code == 200 and b"solardash" in r.content
+            assert r.status_code == 200 and b"Watts the Forecast" in r.content
             r = await c.get("/healthz")
             assert r.json()["ok"]
 

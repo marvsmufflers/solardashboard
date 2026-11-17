@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -85,7 +85,7 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         finally:
             await svc.stop()
 
-    app = FastAPI(title="solardash", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="Watts the Forecast", version=__version__, lifespan=lifespan)
     app.state.service = svc
     gate = install_password_gate(app, cfg.web.password) if cfg.web.password else None
     if gate:
@@ -96,17 +96,26 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         import hashlib
 
         h = hashlib.sha1()
-        for name in ("app.js", "style.css", "index.html"):
+        for name in ("app.js", "style.css", "index.html", "manifest.json", "favicon.ico", "icon-180.png"):
             h.update((STATIC / name).read_bytes())
         return h.hexdigest()[:10]
 
     asset_version = _asset_version()
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return FileResponse(STATIC / "favicon.ico", media_type="image/x-icon")
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    @app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+    async def touch_icon():
+        return FileResponse(STATIC / "icon-180.png", media_type="image/png")
+
     @app.get("/", include_in_schema=False)
     async def index():
         # version the asset URLs so browsers and Cloudflare never serve a stale UI after an update
         html = (STATIC / "index.html").read_text()
-        for name in ("style.css", "app.js", "chart.umd.min.js", "manifest.json"):
+        for name in ("style.css", "app.js", "chart.umd.min.js", "manifest.json", "favicon.ico", "icon-180.png", "icon-64.png"):
             html = html.replace(f"/static/{name}", f"/static/{name}?v={asset_version}")
         return HTMLResponse(html, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
