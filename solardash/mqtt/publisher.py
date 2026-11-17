@@ -237,6 +237,7 @@ class MqttPublisher:
         client.publish(self.availability_topic, "online", retain=True)
         client.subscribe(f"{self.cfg.prefix}/inverter_1/+/set")
         client.subscribe(f"{self.cfg.prefix}/occupancy/set")
+        client.subscribe(f"{self.cfg.ha_prefix}/status")  # Home Assistant birth message
         for topic in self.signal_topics:
             client.subscribe(topic)
             log.info("mqtt: listening for generator signal on %s", topic)
@@ -251,6 +252,12 @@ class MqttPublisher:
     def _on_message(self, client, userdata, msg) -> None:
         self.stats["received"] += 1
         payload = msg.payload.decode(errors="replace").strip()
+        if msg.topic == f"{self.cfg.ha_prefix}/status":
+            if payload.lower() == "online":
+                log.info("mqtt: Home Assistant came online; re-announcing everything")
+                self._discovered.clear()
+                self._last.clear()
+            return
         if msg.topic in self.signal_topics and self.on_signal is not None:
             name, kind = self.signal_topics[msg.topic]
             val = parse_bool_payload(payload)
@@ -297,7 +304,7 @@ class MqttPublisher:
         self._client.publish(topic, payload, retain=retain)
         self.stats["published"] += 1
 
-    def _pub(self, topic: str, value: Any, retain: bool = False) -> None:
+    def _pub(self, topic: str, value: Any, retain: bool = True) -> None:
         if self._client is None or not self.connected:
             return
         s = format_value(value)
@@ -353,7 +360,9 @@ class MqttPublisher:
         if value is None:
             return
         topic = f"{self.cfg.prefix}/{device_id}/{metric}/state"
-        self._discover(device_id, device_name, metric, topic, value, diagnostic=diagnostic)
+        if topic not in self._discovered:
+            self._discover(device_id, device_name, metric, topic, value, diagnostic=diagnostic)
+            self._new_since_flush = True
         self._pub(topic, value)
 
     def publish_snapshot(self) -> None:
@@ -457,6 +466,9 @@ class MqttPublisher:
             elif not self.connected and not self.last_error and time.monotonic() - self._connect_started > 12:
                 # paho retries silently; probe once so the UI can say why
                 self.last_error = self._probe()
+            if time.monotonic() - getattr(self, "_full_at", 0) > 300:
+                self._last.clear()  # every 5 min re-send unchanged values too
+                self._full_at = time.monotonic()
             try:
                 if self.connected:
                     self.publish_snapshot()

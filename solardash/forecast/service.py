@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Any, Callable
 
 from ..config import Config
@@ -273,5 +274,5 @@ def plan_mqtt_values(forecast: dict[str, Any]) -> dict[str, Any]:
                 out[f"plan/{k}"] = plan[k]
         for k in ("start_at", "end_at", "min_soc_at"):
             if plan.get(k):
-                out[f"plan/{k}"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(plan[k]))
+                out[f"plan/{k}"] = datetime.fromtimestamp(plan[k]).astimezone().isoformat(timespec="seconds")
     return out
