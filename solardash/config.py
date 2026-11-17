@@ -276,6 +276,8 @@ def _check_ranges(section: str, obj) -> None:
             raise ValueError("need 0 <= soc_floor < soc_target <= 100")
         if not (obj.soc_target <= obj.soc_target_storm <= 100):
             raise ValueError("soc_target_storm must be between soc_target and 100")
+        if not 0.3 <= obj.generator_dc_kw <= 8:
+            raise ValueError("generator charge must be between 6 and 150 A (0.3–8 kW); an EU3000is into a Chargeverter is about 40–55 A")
         if obj.generator_dc_kw <= 0 or obj.pv_kw_peak <= 0 or obj.max_run_h < obj.min_run_h or obj.horizon_h < 12:
             raise ValueError("generator_dc_kw and pv_kw_peak must be positive, max_run_h >= min_run_h, horizon_h >= 12")
         for q in obj.quiet_hours:
@@ -335,18 +337,34 @@ def build_section(section: str, values: Any):
 
 
 def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
+    """Apply saved Setup values. A value that no longer passes validation is
+    skipped with a warning (the default stays) instead of stopping startup."""
+    import logging
+
+    log = logging.getLogger(__name__)
     for section, values in overrides.items():
         if section not in OVERRIDABLE_SECTIONS:
             continue
-        if section == "generators":
-            cfg.generators = build_section(section, values)
-            continue
-        if section == "batteries":
-            cfg.batteries = build_section(section, values)
-            continue
-        current = asdict(getattr(cfg, section))
-        merged = {**current, **{k: v for k, v in values.items() if k in current}}
-        setattr(cfg, section, build_section(section, merged))
+        try:
+            if section in ("generators", "batteries"):
+                setattr(cfg, section, build_section(section, values))
+                continue
+            current = asdict(getattr(cfg, section))
+            wanted = {k: v for k, v in values.items() if k in current}
+            try:
+                setattr(cfg, section, build_section(section, {**current, **wanted}))
+            except (ValueError, TypeError):
+                # keep every saved value that is fine on its own, drop the bad ones
+                good = dict(current)
+                for k, v in wanted.items():
+                    try:
+                        build_section(section, {**good, k: v})
+                        good[k] = v
+                    except (ValueError, TypeError) as e:
+                        log.warning("setup: ignoring saved %s.%s=%r (%s)", section, k, v, e)
+                setattr(cfg, section, build_section(section, good))
+        except (ValueError, TypeError) as e:
+            log.warning("setup: ignoring saved %s settings (%s)", section, e)
     return cfg
 
 

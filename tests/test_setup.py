@@ -74,3 +74,11 @@ async def test_setup_api_updates_and_reconfigures(tmp_path):
             saved = json.load(open(overrides_path(cfg)))
             assert saved["planner"]["soc_floor"] == 35 and saved["weather"]["station_id"] == "KNEW0001"
             assert saved["weather"].get("api_key") == "secret-key"  # stored so it survives restarts
+
+
+def test_bad_saved_value_does_not_block_startup(tmp_path):
+    cfg = Config()
+    cfg.history.path = str(tmp_path / "x.db")
+    apply_overrides(cfg, {"planner": {"generator_dc_kw": 30.0, "soc_floor": 33.0}, "generators": [{"name": "A"}, {"name": "A"}]})
+    assert cfg.planner.generator_dc_kw == 2.4 and cfg.planner.soc_floor == 33.0  # bad value dropped, good one kept
+    assert len(cfg.generators) == 2  # invalid list ignored, defaults kept

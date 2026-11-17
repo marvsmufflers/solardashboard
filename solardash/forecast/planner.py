@@ -199,7 +199,7 @@ def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: 
             end_soc = max(soc_at_start + 1.0, _end_target(p, floor, floor + draw, not storm))
             # enforce minimum run length by raising end_soc if necessary
             min_gain = p.min_run_h * p.generator_dc_kw * p.charge_efficiency * 0.97 / p.battery_kwh * 100.0
-            end_soc = min(100.0, max(end_soc, soc_at_start + min_gain))
+            end_soc = min(max(p.soc_target, p.soc_target_storm), max(end_soc, soc_at_start + min_gain))
             traj, gen_end = _run_until_target(soc_now, now, hours, p, t_start, end_soc)
             ok_floor = min(s for t, s in traj if t <= gen_end) >= p.soc_floor - 0.01
             if ok_floor and not any(_in_quiet(t, p.quiet_hours) for t in range(int(t_start), int(gen_end), STEP_S)):

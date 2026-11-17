@@ -466,7 +466,7 @@
         <div class="field"><label for="su-display-wind">Wind</label><select id="su-display-wind" data-sec="display" data-key="wind" data-kind="text">${["mph", "km/h"].map((u) => `<option ${d.sections.display.values.wind === u ? "selected" : ""}>${u}</option>`).join("")}</select></div>
         <div class="field"><label for="su-display-rain">Rain</label><select id="su-display-rain" data-sec="display" data-key="rain" data-kind="text">${["in", "mm"].map((u) => `<option ${d.sections.display.values.rain === u ? "selected" : ""}>${u}</option>`).join("")}</select></div></div></div>
       <div class="su-group"><h3>Solar, battery, generator</h3><div class="su-grid">
-        ${fld("planner", "pv_kw_peak", "Solar array (kW)", "number", pl.pv_kw_peak)}${fld("planner", "generator_dc_kw", "Generator charge (kW)", "number", pl.generator_dc_kw)}
+        ${fld("planner", "pv_kw_peak", "Solar array (kW)", "number", pl.pv_kw_peak)}<div class="field"><label for="su-gen-amps">Chargeverter charge current (A)</label><input id="su-gen-amps" type="number" inputmode="decimal" step="any" data-sec="planner" data-key="generator_dc_kw" data-kind="amps" value="${pl.generator_dc_kw != null ? Math.round(pl.generator_dc_kw * 1000 / 52) : ""}" placeholder="46"></div>
         ${fld("planner", "soc_floor", "Start generator at (%)", "number", pl.soc_floor)}${fld("planner", "soc_target", "Stop at (%)", "number", pl.soc_target)}
         ${fld("planner", "soc_target_storm", "Stop at before storms (%)", "number", pl.soc_target_storm)}${fld("planner", "quiet_hours", "Quiet hours", "list", pl.quiet_hours, { ph: "22:00-07:00" })}</div></div>
       <div class="su-group"><h3>Devices</h3>
@@ -516,6 +516,7 @@
       else if (kind === "password") { if (!i.value) return; v = i.value; }
       else if (kind === "list") v = i.value.split(",").map((x) => x.trim()).filter(Boolean);
       else if (kind === "number") v = i.value === "" ? null : Number(i.value);
+      else if (kind === "amps") { v = i.value === "" ? null : Math.round(Number(i.value) * 52) / 1000; if (v != null && Math.abs(v - setupLoaded[sec].values[key]) < 0.03) return; }
       else v = i.value.trim();
       const cur = setupLoaded[sec].values[key];
       if (JSON.stringify(v) !== JSON.stringify(cur)) (bySec[sec] = bySec[sec] || {})[key] = v;

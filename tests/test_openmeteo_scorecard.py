@@ -93,3 +93,11 @@ def test_scorecard(tmp_path):
     assert abs(today["kwh"] - (2.4 * 2 + 1.2 * 1)) < 0.05
     assert abs(today["full_current_share"] - 2 / 3) < 0.01
     assert abs(today["hours_at_floor"] - 0.5) < 0.01 and today["soc_min"] == 28.0
+
+
+def test_min_run_never_pushes_past_storm_cap():
+    now = int(time.time() // 3600) * 3600
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72, soc_target=50, soc_target_storm=80, generator_dc_kw=30.0, min_run_h=1.0)
+    hours = _hours(now, 73, lambda i: 0.0, 0.8)
+    plan = plan_generator(40.0, now, hours, p)
+    assert plan.needed and plan.end_soc <= 80.0
