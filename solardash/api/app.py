@@ -132,6 +132,7 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         snap = svc.state.snapshot()
         snap["display"] = asdict(cfg.display)
         snap["inverter"].pop("_raw", None)
+        snap["sky"] = _sky(svc)
         return snap
 
     @app.get("/api/inverter/raw")
@@ -393,7 +394,15 @@ def _ws_payload(svc: Service) -> dict:
     snap = svc.state.snapshot()
     snap["display"] = asdict(svc.cfg.display)
     snap["inverter"].pop("_raw", None)
+    snap["sky"] = _sky(svc)
     return snap
+
+
+def _sky(svc: Service) -> dict | None:
+    try:
+        return svc.forecast.sky_now() if svc.forecast is not None else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def run(cfg: Config) -> None:

@@ -122,6 +122,7 @@
     $("#t-gen-s").textContent = g ? `${g.name.split(" (")[0]} · ${hours(g.runtime_today_h)} today${g.warming_up ? " · warming up" : ""}` : "";
     const w = state.weather?.current;
     $("#t-wx").textContent = w ? fT(w.temperature_c) : (state.weather?.station_id ? "…" : "–");
+    renderSky(state.sky, w);
     $("#t-wx-s").textContent = w ? `${w.solar_radiation != null ? Math.round(w.solar_radiation) + " W/m² · " : ""}${w.humidity != null ? Math.round(w.humidity) + " % RH" : ""}` : (state.weather?.error ? "station error" : "no station");
     // plan mini
     const fp = state.forecast_summary?.plan;
@@ -175,6 +176,29 @@
         <div class="cells">${bars}</div>
         <div class="pack-meta"><span>cells <b>${fmt(mn, 3)}–${fmt(mx, 3)}</b> Δ <b>${fmt(b.cell_imbalance, 3)}</b></span><span>temp <b>${(b.temperatures || []).length ? fTr(Math.min(...b.temperatures), Math.max(...b.temperatures)) : "–"}</b></span><span>cycles <b>${b.cycles ?? "–"}</b></span><span>${b.remaining_ah != null ? `<b>${b.remaining_ah}</b> / ${b.nominal_ah} Ah` : ""}</span>${(b.protection || []).length ? `<span style="color:var(--bad)">${b.protection.join(", ")}</span>` : ""}${!b.charge_fet_on || !b.discharge_fet_on ? `<span style="color:var(--warn)">FET chg ${b.charge_fet_on ? "on" : "OFF"} / dis ${b.discharge_fet_on ? "on" : "OFF"}</span>` : ""}</div></div>`;
     }).join("") || '<div class="card muted">No batteries configured.</div>';
+  }
+
+  // ---------- weather icon ----------
+  function skyIcon(sky, w) {
+    if (!sky && !w) return null;
+    const day = sky ? sky.is_day : (w?.solar_radiation ?? 0) > 5, c = sky?.code;
+    if (w?.precip_rate_mm_h > 0.1 || (c >= 51 && c <= 67) || (c >= 80 && c <= 82)) return (w?.temperature_c ?? 5) <= 0 && c == null ? "snow" : "rain";
+    if ((c >= 71 && c <= 77) || c === 85 || c === 86) return "snow";
+    if (c >= 95) return "storm";
+    if (c === 45 || c === 48) return "fog";
+    const cloud = sky?.cloud ?? (c === 3 ? 1 : c === 2 ? 0.5 : c != null ? 0.1 : null);
+    if (cloud != null && cloud >= 0.8) return "cloud";
+    if (cloud != null && cloud >= 0.35) return day ? "partly-day" : "partly-night";
+    return day ? "sun" : "moon";
+  }
+  function renderSky(sky, w) {
+    const el = $("#t-wx-ic"); if (!el) return;
+    const k = skyIcon(sky, w);
+    el.hidden = !k;
+    if (k && el.getAttribute("data-k") !== k) {
+      const sym = document.getElementById("w-" + k);  // copy the shapes in so the tile's CSS colours apply
+      el.setAttribute("viewBox", sym.getAttribute("viewBox")); el.innerHTML = sym.innerHTML; el.setAttribute("data-k", k);
+    }
   }
 
   // ---------- inverter ----------

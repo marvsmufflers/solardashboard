@@ -351,3 +351,16 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
   :root:not([data-theme="dark"]) :is(.top, .tabbar) { border-color: var(--line); }
   :root:not([data-theme="dark"]) .tabbar { background: color-mix(in srgb, var(--card) 92%, transparent); }
 }
+
+/* weather icon on the home tile */
+.wx-tile { position: relative; }
+.wx-ic { position: absolute; top: 12px; right: 12px; width: 52px; height: 52px; fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.wx-ic .wx-sun { fill: var(--pv); stroke: none; }
+.wx-ic .wx-ray { stroke: var(--pv); }
+.wx-ic .wx-moon { fill: #c9d3e3; stroke: none; }
+.wx-ic .wx-cloud { fill: color-mix(in srgb, var(--muted) 55%, var(--card)); stroke: none; }
+.wx-ic .wx-rain { stroke: var(--load); }
+.wx-ic .wx-snow { stroke: #9cc3ff; }
+.wx-ic .wx-bolt { stroke: var(--pv); stroke-width: 2.2; }
+.wx-ic .wx-fog { stroke: var(--muted); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .wx-ic .wx-moon { fill: #8d9aae; } :root:not([data-theme="dark"]) .wx-ic .wx-snow { stroke: #5b8fd9; } }

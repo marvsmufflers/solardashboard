@@ -127,6 +127,24 @@ class ForecastTask:
             state.devices["weather:openmeteo"] = self.health
         self.state.forecast = {"available": False, "reason": "not computed yet"}
 
+    def sky_now(self) -> dict | None:
+        """Current conditions for the weather icon: Open-Meteo code/cloud for this hour, day or night."""
+        loc = self._location()
+        if loc is None:
+            return None
+        from datetime import datetime, timezone
+
+        from ..weather.solar import solar_position
+
+        now = time.time()
+        out: dict = {"is_day": solar_position(loc[0], loc[1], datetime.now(timezone.utc))[0] > -0.83}
+        hours = self.openmeteo.hours if self.openmeteo else []
+        cur = next((h for h in hours if h.ts <= now < h.ts + 3600), None)
+        if cur is not None:
+            out.update(code=cur.weather_code, cloud=cur.cloud, precipitation_mm=cur.precipitation_mm,
+                       snowfall_cm=cur.snowfall_cm)
+        return out
+
     def _location(self) -> tuple[float, float] | None:
         w = self.cfg.weather
         if w.latitude is not None and w.longitude is not None:
