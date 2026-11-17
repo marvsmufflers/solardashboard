@@ -364,3 +364,9 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .wx-ic .wx-bolt { stroke: var(--pv); stroke-width: 2.2; }
 .wx-ic .wx-fog { stroke: var(--muted); }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .wx-ic .wx-moon { fill: #8d9aae; } :root:not([data-theme="dark"]) .wx-ic .wx-snow { stroke: #5b8fd9; } }
+
+/* ring gauges around the flow nodes */
+.flow .node circle:first-child { stroke: var(--line) !important; }
+.flow .node circle.arc { fill: none !important; stroke-width: 5; stroke-linecap: round; transform: rotate(-90deg); transition: stroke-dasharray .6s ease; stroke-dasharray: 0 999; }
+.flow .n-pv circle.arc { stroke: var(--pv); } .flow .n-gen circle.arc { stroke: var(--gen); }
+.flow .n-batt circle.arc { stroke: var(--batt); } .flow .n-home circle.arc { stroke: var(--load); }

@@ -456,17 +456,29 @@ class Service:
         gens = []
         any_running = False
         warnings: list[str] = []
-        for n in names:
+
+        def fresh_signal(n: str) -> dict | None:
             cfg = self._generator_by_name(n)
             sig = self.signals.get(n)
             stale_s = cfg.signal_stale_s if cfg else 6 * 3600
-            fresh = sig is not None and sig.get("running") is not None and now - sig["updated"] <= stale_s
+            return sig if sig is not None and sig.get("running") is not None and now - sig["updated"] <= stale_s else None
+
+        # Who is feeding the Chargeverter when only inference says "running"? The cam-switch
+        # selection, unless that generator's own signal says it is off: then it must be one
+        # without a signal (e.g. the porch generator while the outhouse sense wire reads off).
+        supplier = None
+        if delivering and not any((fresh_signal(n) or {}).get("running") for n in names):
+            candidates = [n for n in names if fresh_signal(n) is None]
+            supplier = active if active in candidates else (candidates[0] if candidates else None)
+        for n in names:
+            sig = self.signals.get(n)
+            fresh = fresh_signal(n) is not None
             if fresh:
                 running = bool(sig["running"])
                 source = "signal"
                 contactor = sig.get("contactor")
             else:
-                running = delivering and n == active
+                running = delivering and n == supplier
                 source = "inferred"
                 contactor = None
             if running:
@@ -489,6 +501,7 @@ class Service:
             })
         d["generator_running"] = any_running
         d["generator_active"] = active
+        d["generator_supplying"] = next((g["name"] for g in gens if g["running"]), None)
         d["generator_runtime_today_h"] = round(self._runtime.get(active, 0.0), 2)
         d["generators"] = gens
         d["generator_warnings"] = warnings

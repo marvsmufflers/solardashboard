@@ -108,7 +108,13 @@
     // flow
     const pv = invOk ? inv.pv_power : null, load = invOk ? tot.load_power : null, gen = tot.generator_power;
     $("#fn-pv").textContent = fmtW(pv); $("#fn-load").textContent = fmtW(load); $("#fn-gen").textContent = tot.generator_running ? fmtW(gen) : (gen == null ? "–" : "off"); $("#fn-batt").textContent = bp == null ? "–" : fmtW(Math.abs(bp));
-    $("#fn-gen-label").textContent = (tot.generator_active || "generator").split(" ")[0].toLowerCase();
+    $("#fn-gen-label").textContent = (tot.generator_supplying || tot.generator_active || "generator").split(" ")[0].toLowerCase();
+    // ring gauges: solar vs array peak, generator vs charger output, load vs inverter rating, battery = state of charge
+    const pp = state.forecast_summary?.params || {};
+    arc("fa-pv", pv, (pp.pv_kw_peak || 6) * 1000);
+    arc("fa-gen", tot.generator_running ? gen : 0, (pp.generator_dc_kw || 2.4) * 1000);
+    arc("fa-load", load, 6000);
+    arc("fa-batt", soc, 100);
     $("#fn-batt-label").textContent = soc == null ? "battery" : `battery ${Math.round(soc)} %`;
     const idle = (sel, on) => document.querySelector(sel)?.classList.toggle("idle", !on);
     idle(".n-pv", pv > 20); idle(".n-gen", tot.generator_running); idle(".n-batt", bp != null && Math.abs(bp) > 20);
@@ -176,6 +182,13 @@
         <div class="cells">${bars}</div>
         <div class="pack-meta"><span>cells <b>${fmt(mn, 3)}–${fmt(mx, 3)}</b> Δ <b>${fmt(b.cell_imbalance, 3)}</b></span><span>temp <b>${(b.temperatures || []).length ? fTr(Math.min(...b.temperatures), Math.max(...b.temperatures)) : "–"}</b></span><span>cycles <b>${b.cycles ?? "–"}</b></span><span>${b.remaining_ah != null ? `<b>${b.remaining_ah}</b> / ${b.nominal_ah} Ah` : ""}</span>${(b.protection || []).length ? `<span style="color:var(--bad)">${b.protection.join(", ")}</span>` : ""}${!b.charge_fet_on || !b.discharge_fet_on ? `<span style="color:var(--warn)">FET chg ${b.charge_fet_on ? "on" : "OFF"} / dis ${b.discharge_fet_on ? "on" : "OFF"}</span>` : ""}</div></div>`;
     }).join("") || '<div class="card muted">No batteries configured.</div>';
+  }
+
+  function arc(id, v, max) {
+    const el = document.getElementById(id); if (!el) return;
+    const r = +el.getAttribute("r"), c = 2 * Math.PI * r;
+    const f = v == null || !(max > 0) ? 0 : Math.max(0, Math.min(1, Math.abs(v) / max));
+    el.style.strokeDasharray = `${(f * c).toFixed(1)} ${c.toFixed(1)}`; el.style.opacity = f > 0.005 ? 1 : 0;
   }
 
   // ---------- weather icon ----------
