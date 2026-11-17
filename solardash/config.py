@@ -17,7 +17,7 @@ class InverterConfig:
     port: str = "/dev/ttyACM0"
     baud: int = 19200
     unit: int = 1
-    poll_interval: float = 5.0
+    poll_interval: float = 2.0
     settings_poll_interval: float = 60.0
     allow_writes: bool = False
     timeout: float = 1.0
@@ -29,7 +29,7 @@ class BatteryConfig:
     name: str = "Battery 1"
     port: str = "/dev/ttyACM1"
     baud: int = 9600
-    poll_interval: float = 5.0
+    poll_interval: float = 2.0
     timeout: float = 1.0
     capacity_ah: float = 100.0
     enabled: bool = True
@@ -336,6 +336,9 @@ def build_section(section: str, values: Any):
     return obj
 
 
+OLD_POLL_DEFAULT = 5.0
+
+
 def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
     """Apply saved Setup values. A value that no longer passes validation is
     skipped with a warning (the default stays) instead of stopping startup."""
@@ -345,6 +348,12 @@ def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
     for section, values in overrides.items():
         if section not in OVERRIDABLE_SECTIONS:
             continue
+        # Setup used to save the old 5 s poll default along with everything else; let the faster default apply
+        if section == "inverter" and isinstance(values, dict) and values.get("poll_interval") == OLD_POLL_DEFAULT:
+            values = {k: v for k, v in values.items() if k != "poll_interval"}
+        if section == "batteries" and isinstance(values, list):
+            values = [{k: v for k, v in b.items() if not (k == "poll_interval" and v == OLD_POLL_DEFAULT)}
+                      if isinstance(b, dict) else b for b in values]
         try:
             if section in ("generators", "batteries"):
                 setattr(cfg, section, build_section(section, values))

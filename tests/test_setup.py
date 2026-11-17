@@ -82,3 +82,11 @@ def test_bad_saved_value_does_not_block_startup(tmp_path):
     apply_overrides(cfg, {"planner": {"generator_dc_kw": 30.0, "soc_floor": 33.0}, "generators": [{"name": "A"}, {"name": "A"}]})
     assert cfg.planner.generator_dc_kw == 2.4 and cfg.planner.soc_floor == 33.0  # bad value dropped, good one kept
     assert len(cfg.generators) == 2  # invalid list ignored, defaults kept
+
+
+def test_old_saved_poll_default_is_upgraded(tmp_path):
+    cfg = Config()
+    apply_overrides(cfg, {"inverter": {"poll_interval": 5.0, "baud": 19200},
+                          "batteries": [{"name": "B1", "port": "/dev/ttyACM1", "poll_interval": 5.0}, {"name": "B2", "port": "/dev/ttyACM2", "poll_interval": 3.0}]})
+    assert cfg.inverter.poll_interval == 2.0
+    assert [b.poll_interval for b in cfg.batteries] == [2.0, 3.0]  # a deliberate custom value is kept

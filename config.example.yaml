@@ -11,7 +11,7 @@ inverter:
   port: /dev/ttyACM0     # RS485 to the inverter's dongle/INV485 port
   baud: 19200
   unit: 1
-  poll_interval: 5       # seconds between live-data polls
+  poll_interval: 2       # seconds between live-data polls
   settings_poll_interval: 60
   allow_writes: false    # must be true before any setting can be changed from the UI/API
 
