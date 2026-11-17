@@ -274,3 +274,13 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .gauge-rate { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; color: var(--muted); min-height: 22px; }
 .gauge-rate.up { color: var(--ok); } .gauge-rate.down { color: var(--warn); }
 .gauge-sub { margin-top: 2px; font-size: 12.5px; }
+
+/* runway countdown ring */
+.runway .rw { position: relative; width: 92px; height: 92px; margin: 6px 0 4px; }
+.rw-ring { width: 92px; height: 92px; transform: rotate(-90deg); }
+.rw-v { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.rw-ring circle { fill: none; stroke-width: 6; stroke-linecap: round; }
+.rw-track { stroke: var(--line); }
+.rw-fill { stroke: var(--ok); stroke-dasharray: 0 170; transition: stroke-dasharray .8s cubic-bezier(.2,.7,.2,1), stroke .3s; }
+.rw-fill.low { stroke: var(--warn); } .rw-fill.crit { stroke: var(--bad); } .rw-fill.chg { stroke: var(--batt); }
+.runway .v { line-height: 1.1; }

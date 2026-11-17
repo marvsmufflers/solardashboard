@@ -94,9 +94,19 @@
     if (bp != null && soc != null && Math.abs(bp) > 30) {
       const target = bp < 0 ? floor : 100;
       const h = Math.abs((target - soc) / 100 * kwh * 1000 / bp);
-      $("#h-runway").textContent = h > 48 ? "> 2 days" : hours(h);
-      $("#h-runway-sub").textContent = bp < 0 ? `to ${floor} % at this load` : "to full at this rate";
+      $("#h-runway").textContent = h > 48 ? ">2d" : h < 1 ? `${Math.round(h * 60)}m` : h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`;
+      $("#h-runway-sub").textContent = bp < 0 ? `to ${floor} % at this load` : "to full";
     } else { $("#h-runway").textContent = "–"; $("#h-runway-sub").textContent = soc != null ? "battery idle" : ""; }
+    // countdown ring: discharging = usable energy left above the floor; charging = how full
+    const ring = $("#rw-fill"), C = 2 * Math.PI * 28;
+    if (soc != null) {
+      const charging = bp != null && bp > 30;
+      const frac = charging ? soc / 100 : Math.max(0, Math.min(1, (soc - floor) / (100 - floor)));
+      const hrs = bp != null && Math.abs(bp) > 30 ? Math.abs(((charging ? 100 : floor) - soc) / 100 * kwh * 1000 / bp) : null;
+      ring.style.strokeDasharray = `${frac * C} ${C}`;
+      ring.setAttribute("class", "rw-fill " + (charging ? "chg" : hrs != null && hrs < 2 ? "crit" : hrs != null && hrs < 6 ? "low" : "ok"));
+      $("#h-runway-k").textContent = charging ? "Until full" : "Runway";
+    } else ring.style.strokeDasharray = `0 ${C}`;
     // flow
     const pv = invOk ? inv.pv_power : null, load = invOk ? tot.load_power : null, gen = tot.generator_power;
     $("#fn-pv").textContent = fmtW(pv); $("#fn-load").textContent = fmtW(load); $("#fn-gen").textContent = tot.generator_running ? fmtW(gen) : (gen == null ? "–" : "off"); $("#fn-batt").textContent = bp == null ? "–" : fmtW(Math.abs(bp));
