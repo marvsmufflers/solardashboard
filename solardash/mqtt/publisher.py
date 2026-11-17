@@ -208,6 +208,8 @@ class MqttPublisher:
     def _explain(self, reason) -> str:
         r = str(reason).lower()
         where = f"{self.cfg.host}:{self.cfg.port}"
+        if self.cfg.host.strip().lower() in ("localhost", "127.0.0.1", "::1", ""):
+            return "Broker address must be Home Assistant's IP address (e.g. 192.168.1.50); 'localhost' means the solardash container itself."
         if "not authorized" in r or "bad user" in r or "password" in r:
             return f"Broker at {where} rejected the username or password."
         if "refused" in r and "connection" in r:
@@ -450,7 +452,9 @@ class MqttPublisher:
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
-            if not self.connected and not self.last_error and time.monotonic() - self._connect_started > 12:
+            if not self.connected and self.cfg.host.strip().lower() in ("localhost", "127.0.0.1", "::1", ""):
+                self.last_error = self._explain("")
+            elif not self.connected and not self.last_error and time.monotonic() - self._connect_started > 12:
                 # paho retries silently; probe once so the UI can say why
                 self.last_error = self._probe()
             try:

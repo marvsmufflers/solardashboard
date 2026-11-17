@@ -140,7 +140,7 @@ class WebConfig:
 @dataclass
 class MqttConfig:
     enabled: bool = False
-    host: str = "localhost"
+    host: str = ""
     port: int = 1883
     username: str = ""
     password: str = ""
