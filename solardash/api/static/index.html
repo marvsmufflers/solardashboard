@@ -39,6 +39,7 @@
 
 <!-- ================= HOME ================= -->
 <section id="tab-home" class="tab active">
+  <div class="home-top">
   <div class="hero">
     <div class="gauge-wrap">
       <svg class="gauge" viewBox="0 0 200 200" aria-hidden="true">
@@ -72,6 +73,7 @@
       <text class="nl" x="180" y="280" id="fn-batt-label">battery</text>
     </svg>
   </div>
+  </div>
 
   <div class="tiles">
     <div class="tile"><div class="k">Solar today</div><div class="v" id="t-pv-e">–</div><div class="s" id="t-pv-s"></div><canvas class="spark" id="sp-pv" height="34"></canvas></div>
@@ -98,28 +100,34 @@
     <div class="grid3" id="bank-stats"></div>
   </div>
   <div id="packs" class="packs"></div>
-  <div class="card"><h2>State of charge</h2><div class="chart"><canvas id="chart-soc"></canvas></div></div>
-  <div class="card"><h2>Pack temperatures &amp; cell spread</h2><div class="chart"><canvas id="chart-batt"></canvas></div></div>
+  <div class="card"><div class="card-head"><h2>State of charge · 48 h</h2></div><div class="chart"><canvas id="chart-soc"></canvas></div><div class="chart-note" id="soc-note"></div></div>
+  <div class="two-col">
+    <div class="card"><div class="card-head"><h2>Pack temperature</h2></div><div class="chart short"><canvas id="chart-temp"></canvas></div></div>
+    <div class="card"><div class="card-head"><h2>Cell spread</h2><span class="muted small">lower is better</span></div><div class="chart short"><canvas id="chart-spread"></canvas></div></div>
+  </div>
 </section>
 
 <!-- ================= GENERATOR ================= -->
 <section id="tab-generator" class="tab">
   <div class="card plan-card">
-    <div class="card-head"><h2>Plan</h2><span class="badge" id="plan-badge">–</span></div>
-    <p class="lead" id="plan-reason">–</p>
-    <div class="grid3" id="plan-kv"></div>
+    <div class="card-head"><h2>Generator plan</h2><span class="badge" id="plan-badge">–</span></div>
+    <div class="plan-head" id="plan-head">–</div>
+    <div class="plan-sub" id="plan-sub"></div>
+    <div class="plan-warn" id="plan-warn"></div>
+    <div class="plan-next muted small" id="plan-next"></div>
+    <details class="plan-more"><summary>Details</summary><p class="muted small" id="plan-reason"></p><div class="grid3" id="plan-kv"></div></details>
   </div>
   <div class="card">
-    <div class="card-head"><h2>Next 72 h</h2><div><span class="badge subtle" id="forecast-source"></span> <button class="btn" id="forecast-recompute">↻</button></div></div>
+    <div class="card-head"><h2>Next 3 days</h2><div><span class="badge subtle" id="forecast-source"></span> <button class="btn" id="forecast-recompute">↻</button></div></div>
     <div class="chart tall"><canvas id="chart-forecast"></canvas></div>
   </div>
-  <div class="card"><h2>Outlook</h2><div id="forecast-days" class="days"></div></div>
+  <div class="card"><h2>Daily outlook</h2><div id="forecast-days" class="days"></div></div>
   <div class="card">
     <div class="card-head"><h2>Generators</h2><label class="inline">Cam switch <select id="gen-select"></select></label></div>
     <div id="gen-list" class="gen-list"></div>
   </div>
   <div class="card"><div class="card-head"><h2>Scorecard</h2><span class="muted small">last 14 days</span></div><div class="scroll-x" id="scorecard"></div></div>
-  <div class="card"><h2>PV model</h2><div class="grid3" id="pv-model"></div></div>
+  <div class="card"><h2>Solar model</h2><div class="grid3" id="pv-model"></div></div>
 </section>
 
 <!-- ================= INVERTER ================= -->

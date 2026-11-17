@@ -128,9 +128,9 @@
     const pb = $("#pm-badge");
     if (!fp) { pb.textContent = "plan"; pb.className = "badge subtle"; $("#pm-title").textContent = "No forecast yet"; $("#pm-text").textContent = state.forecast_summary?.reason || ""; }
     else {
-      const [cls, title] = fp.stop_recommended ? ["warn", "Stop the generator"] : fp.recommended_now ? ["warn", "Start the generator now"] : fp.needed ? ["", `Generator ${fmtDT(fp.start_at)} for ${hours(fp.run_h)}`] : ["ok", "No generator needed"];
-      pb.textContent = fp.needed ? "plan" : "plan ✓"; pb.className = "badge " + cls; $("#pm-title").textContent = title;
-      $("#pm-text").textContent = fp.needed ? `${fp.start_soc ?? "–"} → ${fp.end_soc} % · lowest without it ${fp.min_soc_without} % ${fp.min_soc_at ? fmtDT(fp.min_soc_at) : ""}` : `bottoms out at ${fp.min_soc_without} % ${fp.min_soc_at ? fmtDT(fp.min_soc_at) : ""}`;
+      const [cls, title, badge] = fp.stop_recommended ? ["warn", "Stop the generator", "stop"] : fp.recommended_now ? ["warn", "Start the generator now", "start"] : fp.needed ? ["", `Generator ${when(fp.start_at)}`, "plan"] : ["ok", "No generator needed", "plan"];
+      pb.textContent = badge; pb.className = "badge " + cls; $("#pm-title").textContent = title;
+      $("#pm-text").textContent = fp.needed ? `Run ${hours(fp.run_h)} · ${Math.round(fp.start_soc ?? state.total?.battery_state_of_charge ?? 0)} → ${Math.round(fp.end_soc)} %` : `Lowest point ${Math.round(fp.min_soc_without)} % ${fp.min_soc_at ? when(fp.min_soc_at) : ""}`;
     }
     $("#plan-mini").onclick = () => showTab("generator");
   }
@@ -166,7 +166,8 @@
     ]);
     $("#packs").innerHTML = (state.batteries || []).map((b) => {
       const cells = b.cells || [], mn = b.cell_min, mx = b.cell_max;
-      const bars = cells.map((c, i) => `<i class="${c === mn ? "lo" : c === mx ? "hi" : ""}${(b.balancing || []).includes(i + 1) ? " bal" : ""}" style="height:${Math.max(8, Math.min(100, ((c - 3.0) / 0.6) * 100))}%" title="cell ${i + 1}: ${c.toFixed(3)} V"></i>`).join("");
+      const flag = (b.cell_imbalance || 0) >= 0.03;
+      const bars = cells.map((c, i) => `<i class="${flag && c === mn ? "lo" : flag && c === mx ? "hi" : ""}${(b.balancing || []).includes(i + 1) ? " bal" : ""}" style="height:${Math.max(8, Math.min(100, ((c - 3.0) / 0.6) * 100))}%" title="cell ${i + 1}: ${c.toFixed(3)} V"></i>`).join("");
       const stale = b.age_s > 60;
       return `<div class="pack"><div class="pack-head"><span class="name">${b.name}</span><span class="badge ${stale ? "bad" : "ok"}">${stale ? "stale " + ago(b.age_s) : fmtW(b.power)}</span></div>
         <div class="pack-soc">${b.soc ?? "–"} %<small>${fmt(b.voltage, 2, "V")} · ${fmt(b.current, 1, "A")}</small></div>
@@ -201,26 +202,58 @@
   }
 
   // ---------- charts ----------
-  function chartOpts(unit, extra = {}) {
+  const STEP = { "6h": 300, "24h": 600, "48h": 900, "7d": 3600, "30d": 3 * 3600 };
+  const kW = (v) => (v == null ? "–" : Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(Math.abs(v) >= 10000 ? 0 : 1)} kW` : `${Math.round(v)} W`);
+  function timeTick(value, index) {
+    const ch = this.chart, ts = ch.data.labels[index]; if (ts == null) return "";
+    const step = ch.$step || 600, labels = ch.data.labels, span = labels[labels.length - 1] - labels[0];
+    const d = new Date(ts * 1000), sec = d.getHours() * 3600 + d.getMinutes() * 60;
+    const iv = span <= 8 * 3600 ? 3600 : span <= 30 * 3600 ? 4 * 3600 : span <= 3.5 * 86400 ? 12 * 3600 : 86400;
+    if (iv < 86400) {
+      if (sec % iv >= step) return "";
+      if (sec < step && span > 30 * 3600) return d.toLocaleDateString([], { weekday: "short" });
+      return d.toLocaleTimeString([], { hour: "numeric" }).replace(":00", "");
+    }
+    if (sec >= step) return "";
+    if (span > 10 * 86400) return d.getDate() % 5 === 0 ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+    return d.toLocaleDateString([], { weekday: "short" });
+  }
+  function baseOpts({ fmtY = (v) => v, yMin, yMax, legend = true, extraScales = {}, tooltipFmt } = {}) {
     const p = palette();
-    Chart.defaults.color = p.muted; Chart.defaults.borderColor = p.line; Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.color = p.muted; Chart.defaults.borderColor = p.line; Chart.defaults.font.family = getComputedStyle(document.body).fontFamily; Chart.defaults.font.size = 11.5;
     return {
       animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "circle", padding: 14 } }, tooltip: { backgroundColor: css("--card-2"), titleColor: p.text, bodyColor: p.text, borderColor: p.line, borderWidth: 1 } },
-      scales: { x: { ticks: { maxTicksLimit: 6, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } }, y: { ticks: { callback: (v) => +(+v).toFixed(3) + " " + unit, maxTicksLimit: 6 }, grid: { color: p.line } } },
-      elements: { point: { radius: 0, hoverRadius: 4 }, line: { borderWidth: 2, tension: 0.3 } }, ...extra,
+      layout: { padding: { top: 4, right: 2 } },
+      plugins: {
+        legend: { display: legend, position: "bottom", labels: { usePointStyle: true, pointStyle: "rectRounded", boxWidth: 9, boxHeight: 9, padding: 14, color: p.text, filter: (it) => !it.text.startsWith("_") } },
+        tooltip: {
+          backgroundColor: css("--card-2"), titleColor: p.text, bodyColor: p.text, borderColor: p.line, borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+          filter: (it) => !it.dataset.label.startsWith("_") && it.raw != null,
+          callbacks: {
+            title: (items) => (items[0] ? new Date(items[0].label * 1000).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : ""),
+            label: (it) => ` ${it.dataset.label}: ${(tooltipFmt || fmtY)(it.raw)}`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { autoSkip: false, maxRotation: 0, callback: timeTick, color: p.muted }, grid: { display: false }, border: { display: false } },
+        y: { min: yMin, max: yMax, ticks: { callback: fmtY, maxTicksLimit: 5, color: p.muted }, grid: { color: (c) => (c.tick && c.tick.value === 0 ? p.muted + "88" : p.line + "99") }, border: { display: false } },
+        ...extraScales,
+      },
+      elements: { point: { radius: 0, hoverRadius: 4, hitRadius: 8 }, line: { borderWidth: 2, tension: 0.35, borderJoinStyle: "round" } },
     };
   }
-  const fmtTs = (ts) => { const d = new Date(ts * 1000); return range === "6h" || range === "24h" ? d.toLocaleTimeString([], { hour: "numeric" }) : d.toLocaleDateString([], { weekday: "short" }) + " " + d.toLocaleTimeString([], { hour: "numeric" }); };
   async function fetchSeries(metrics, r = range) {
-    const res = await fetch(`/api/history?metrics=${encodeURIComponent(metrics.join(","))}&range=${r}`);
+    const res = await fetch(`/api/history?metrics=${encodeURIComponent(metrics.join(","))}&range=${r}&step=${STEP[r] || 600}`);
     return (await res.json()).series;
   }
-  function upsert(id, labels, datasets, unit, extra = {}) {
+  function draw(id, labels, datasets, opts, step, type = "line") {
     if (typeof Chart === "undefined") return;
-    if (charts[id]) { charts[id].data.labels = labels; charts[id].data.datasets = datasets; charts[id].update(); return charts[id]; }
-    charts[id] = new Chart(document.getElementById(id), { type: "line", data: { labels, datasets }, options: chartOpts(unit, extra) });
-    return charts[id];
+    let ch = charts[id];
+    if (!ch) ch = charts[id] = new Chart(document.getElementById(id), { type, data: { labels, datasets }, options: opts });
+    else { ch.data.labels = labels; ch.data.datasets = datasets; ch.options = opts; }
+    ch.$step = step; ch.update();
+    return ch;
   }
   function align(series, keys) {
     const ts = new Set(); keys.forEach((k) => (series[k] || []).forEach(([t]) => ts.add(t)));
@@ -228,16 +261,17 @@
     const maps = keys.map((k) => new Map(series[k] || []));
     return { labels, cols: maps.map((m) => labels.map((t) => (m.has(t) ? m.get(t) : null))) };
   }
-  const area = (c) => c + "33";
+  const alpha = (c, a) => c + Math.round(a * 255).toString(16).padStart(2, "0");
   async function loadPowerChart() {
     const p = palette(); const keys = ["total/pv_power", "total/load_power", "total/battery_power", "total/generator_power"];
     const s = await fetchSeries(keys); const { labels, cols } = align(s, keys);
-    upsert("chart-power", labels, [
-      { label: "Solar", data: cols[0], borderColor: p.pv, backgroundColor: area(p.pv), fill: true },
-      { label: "Load", data: cols[1], borderColor: p.load },
-      { label: "Battery", data: cols[2], borderColor: p.batt },
-      { label: "Generator", data: cols[3], borderColor: p.gen, backgroundColor: area(p.gen), fill: true },
-    ], "W");
+    const gen = cols[3].map((v) => (v ? v : null));
+    draw("chart-power", labels, [
+      { label: "Solar", data: cols[0], borderColor: p.pv, backgroundColor: alpha(p.pv, 0.22), fill: "origin", order: 3 },
+      { label: "Generator", data: gen, borderColor: p.gen, backgroundColor: alpha(p.gen, 0.22), fill: "origin", order: 4, spanGaps: false },
+      { label: "Battery", data: cols[2], borderColor: alpha(p.batt, 0.9), borderWidth: 1.5, fill: { target: "origin", above: alpha(p.batt, 0.12), below: alpha(p.cv, 0.12) }, order: 2 },
+      { label: "Load", data: cols[1], borderColor: p.load, borderWidth: 2.2, order: 1 },
+    ], baseOpts({ fmtY: kW, tooltipFmt: (v) => (v == null ? "–" : kW(v)) }), STEP[range]);
     sparkline("sp-pv", s["total/pv_power"], p.pv); sparkline("sp-load", s["total/load_power"], p.load);
   }
   function sparkline(id, series, color) {
@@ -250,24 +284,28 @@
     ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath(); ctx.fillStyle = color + "22"; ctx.fill();
   }
   async function loadSocChart() {
-    const p = palette(); const s = await fetchSeries(["total/battery_state_of_charge"], "24h");
-    const { labels, cols } = align(s, ["total/battery_state_of_charge"]);
-    const saved = range; range = "24h";
-    upsert("chart-soc", labels, [{ label: "SOC", data: cols[0], borderColor: p.batt, backgroundColor: area(p.batt), fill: true }], "%", { scales: { y: { min: 0, max: 100, ticks: { callback: (v) => v + " %" } }, x: { ticks: { maxTicksLimit: 6, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } } } });
-    range = saved;
+    const p = palette(), r = "48h";
+    const s = await fetchSeries(["total/battery_state_of_charge", "total/generator_power"], r);
+    const { labels, cols } = align(s, ["total/battery_state_of_charge", "total/generator_power"]);
+    const prm = state?.forecast_summary?.params || {}, floor = prm.soc_floor ?? 30, target = prm.soc_target ?? 50;
+    draw("chart-soc", labels, [
+      { label: "State of charge", data: cols[0], borderColor: p.batt, backgroundColor: alpha(p.batt, 0.16), fill: "origin", order: 1 },
+      { label: "Generator running", data: cols[1].map((v) => (v > 0 ? 100 : null)), borderWidth: 0, backgroundColor: alpha(p.gen, 0.16), fill: "origin", stepped: true, spanGaps: false, order: 3 },
+      { label: `_floor`, data: labels.map(() => floor), borderColor: alpha(css("--bad"), 0.7), borderDash: [5, 5], borderWidth: 1.2, order: 2 },
+      { label: `_target`, data: labels.map(() => target), borderColor: alpha(p.muted, 0.7), borderDash: [2, 4], borderWidth: 1.2, order: 2 },
+    ], baseOpts({ yMin: 0, yMax: 100, fmtY: (v) => `${v} %`, tooltipFmt: (v) => `${Math.round(v)} %` }), STEP[r]);
+    $("#soc-note").innerHTML = `<span class="key k-floor"></span> generator start ${floor} % <span class="key k-target"></span> normal stop ${target} %`;
   }
   async function loadBattChart() {
-    const p = palette(); const n = (state?.batteries || []).length || 3; const keys = [];
-    for (let i = 1; i <= n; i++) keys.push(`battery_${i}/temperature`, `battery_${i}/cell_imbalance`);
-    const s = await fetchSeries(keys, "24h"); const { labels, cols } = align(s, keys); const ds = [];
-    const colors = [p.batt, p.load, p.pv, p.gen, p.cv, "#1fa3a3"];
-    for (let i = 0; i < n; i++) {
-      ds.push({ label: `Pack ${i + 1} ${TU()}`, data: cols[2 * i].map(tC), borderColor: colors[i % 6], yAxisID: "y" });
-      ds.push({ label: `Pack ${i + 1} Δ`, data: cols[2 * i + 1], borderColor: colors[i % 6], borderDash: [4, 3], yAxisID: "y1" });
-    }
-    const saved = range; range = "24h";
-    upsert("chart-batt", labels, ds, "", { scales: { y: { ticks: { callback: (v) => +(+v).toFixed(1) + " " + TU() } }, y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: (v) => +(+v).toFixed(3) + " V" } }, x: { ticks: { maxTicksLimit: 6, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } } } });
-    range = saved;
+    const p = palette(), r = "48h", n = (state?.batteries || []).length || 3;
+    const tk = [], ik = []; for (let i = 1; i <= n; i++) { tk.push(`battery_${i}/temperature`); ik.push(`battery_${i}/cell_imbalance`); }
+    const s = await fetchSeries([...tk, ...ik], r);
+    const colors = [p.batt, p.load, p.pv, p.gen, p.cv, "#2bb3b3"];
+    const t = align(s, tk), im = align(s, ik);
+    draw("chart-temp", t.labels, t.cols.map((c, i) => ({ label: `Pack ${i + 1}`, data: c.map(tC), borderColor: colors[i % 6] })),
+      baseOpts({ fmtY: (v) => `${Math.round(v)}${TU()}`, tooltipFmt: (v) => `${v.toFixed(1)} ${TU()}` }), STEP[r]);
+    draw("chart-spread", im.labels, im.cols.map((c, i) => ({ label: `Pack ${i + 1}`, data: c.map((v) => (v == null ? null : v * 1000)), borderColor: colors[i % 6] })),
+      baseOpts({ yMin: 0, fmtY: (v) => `${Math.round(v)} mV`, tooltipFmt: (v) => `${v.toFixed(0)} mV` }), STEP[r]);
   }
 
   // ---------- generator / forecast ----------
@@ -290,64 +328,84 @@
     try { const d = await (await fetch("/api/generators")).json(); genTotals = Object.fromEntries(d.generators.map((g) => [g.name, g.runtime_total_h])); if (state) renderGenLive(state.total || {}); } catch (e) {}
     loadScorecard();
   }
+  const when = (ts) => {
+    const d = new Date(ts * 1000), now = new Date(), tm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86400000);
+    return days === 0 ? `today ${tm}` : days === 1 ? `tomorrow ${tm}` : `${d.toLocaleDateString([], { weekday: "long" })} ${tm}`;
+  };
   async function loadForecast() {
     const f = await (await fetch("/api/forecast")).json();
-    const plan = f.plan; const badge = $("#plan-badge");
-    if (!f.available) { $("#plan-reason").textContent = f.reason || "unavailable"; badge.textContent = "unavailable"; badge.className = "badge"; kv($("#plan-kv"), []); return; }
-    if (!plan) { badge.textContent = "planner off"; badge.className = "badge"; $("#plan-reason").textContent = "Planner disabled or no SOC yet."; }
+    const plan = f.plan, badge = $("#plan-badge");
+    if (!f.available) {
+      $("#plan-head").textContent = "No plan yet"; $("#plan-sub").textContent = f.reason || ""; $("#plan-warn").textContent = "";
+      badge.textContent = "waiting"; badge.className = "badge subtle"; return;
+    }
+    const prm = f.params;
+    if (!plan) { $("#plan-head").textContent = "Planner is off"; $("#plan-sub").textContent = ""; badge.textContent = "off"; badge.className = "badge subtle"; }
     else {
-      badge.textContent = plan.stop_recommended ? "stop now" : plan.recommended_now ? "start now" : plan.needed ? "scheduled" : "no run needed";
-      badge.className = "badge " + (plan.recommended_now || plan.stop_recommended ? "warn" : plan.needed ? "" : "ok");
+      let head, sub, cls;
+      if (plan.stop_recommended) { head = "Stop the generator"; sub = `Battery has what it needs (${Math.round(f.soc_now)} %).`; cls = "warn"; }
+      else if (plan.recommended_now) { head = "Start the generator now"; sub = `Run about ${hours(plan.run_h)}, to ${Math.round(plan.end_soc)} %`; cls = "warn"; }
+      else if (plan.needed) { head = `Start ${when(plan.start_at)}`; sub = `Run ${hours(plan.run_h)} · ${Math.round(plan.start_soc)} → ${Math.round(plan.end_soc)} % · stops ${when(plan.end_at)}`; cls = ""; }
+      else { head = "No generator needed"; sub = `Lowest point ${Math.round(plan.min_soc_without)} % ${when(plan.min_soc_at)} · next ${prm.horizon_h} h`; cls = "ok"; }
+      $("#plan-head").textContent = head; $("#plan-sub").textContent = sub;
+      badge.textContent = plan.stop_recommended ? "stop" : plan.recommended_now ? "start" : plan.needed ? "scheduled" : "all good"; badge.className = "badge " + cls;
+      $("#plan-warn").innerHTML = plan.needed && plan.min_soc_without < prm.soc_floor ? `Without it the bank reaches <b>${Math.round(plan.min_soc_without)} %</b> ${when(plan.min_soc_at)}.` : "";
+      $("#plan-next").textContent = plan.next_deficit_at ? `Another run will be needed ${when(plan.next_deficit_at)}.` : "";
       $("#plan-reason").textContent = plan.reason;
       kv($("#plan-kv"), [
-        ["Start", plan.start_at ? fmtDT(plan.start_at) : "–"], ["Stop", plan.end_at ? fmtDT(plan.end_at) : "–"], ["Run", plan.needed ? hours(plan.run_h) : "–"],
-        ["SOC", plan.needed ? `${plan.start_soc ?? f.soc_now} → ${plan.end_soc} %` : "–"], ["Energy", plan.needed ? fmt(plan.energy_kwh, 1, "kWh") : "–"], ["Lowest without", `${plan.min_soc_without} % ${plan.min_soc_at ? fmtDT(plan.min_soc_at) : ""}`, plan.min_soc_without < f.params.soc_floor ? "bad" : ""],
-        ["Next run after", plan.next_deficit_at ? fmtDT(plan.next_deficit_at) : "none in horizon"], ["Floor / target / storm", `${f.params.soc_floor} / ${f.params.soc_target} / ${f.params.soc_target_storm} %`], ["Load profile", f.occupancy ? `${f.occupancy}${f.model.load_profiles?.[f.occupancy] ? "" : " (overall until learned)"}` : "overall"],
+        ["Energy from generator", plan.needed ? fmt(plan.energy_kwh, 1, "kWh") : "–"], ["Start / stop at", `${prm.soc_floor} % / ${prm.soc_target} % (storm ${prm.soc_target_storm} %)`],
+        ["Battery used for planning", fmt(prm.battery_kwh, 1, "kWh")], ["Load profile", f.occupancy ? `${f.occupancy}${f.model.load_profiles?.[f.occupancy] ? "" : " (learning)"}` : "overall"],
       ]);
     }
-    const src = f.sources || {}; const hb = src.hours_by_source || {};
-    $("#forecast-source").textContent = hb.openmeteo ? "Open-Meteo" : hb.wunderground ? "Wunderground" : (src.openmeteo_error ? "no forecast" : "assumed sky");
-    $("#forecast-source").className = "badge " + (hb.openmeteo ? "ok" : hb.wunderground ? "subtle" : "warn");
+    const src = f.sources || {}, hb = src.hours_by_source || {};
+    $("#forecast-source").textContent = hb.openmeteo ? "Open-Meteo" : hb.wunderground ? "Wunderground" : src.openmeteo_error ? "no forecast" : "assumed sky";
+    $("#forecast-source").className = "badge " + (hb.openmeteo ? "subtle" : "warn");
     const m = f.model;
     kv($("#pv-model"), [
-      ["Clear-sky capacity", `${m.k_clear} kW/(kW/m²) · ${m.k_clear_source}, ${m.samples_clear} h`], ["Bias correction", `×${m.bias} · ${m.samples_bias} h`],
-      ["Per measured W/m²", m.k_meas != null ? `${(m.k_meas * 1000).toFixed(2)} W · ${m.samples_meas} h` : "no pyranometer yet"],
-      ["Expected now", f.expected_now_kw != null ? `${f.expected_now_kw.toFixed(2)} kW vs ${f.actual_now_kw?.toFixed(2)} kW actual` : "–"],
-      ["Load profile", `${m.load_profile_source} · ${m.load_days} d · avg ${(m.load_profile_kw.reduce((a, b) => a + b, 0) / 24).toFixed(2)} kW`], ["Model refreshed", ago((Date.now() / 1000) - m.fitted_at)],
+      ["Array output on a clear day", `${m.k_clear} kW per kW/m² (${m.k_clear_source})`], ["Forecast correction", `×${m.bias}`],
+      ["Expected now", f.expected_now_kw != null ? `${f.expected_now_kw.toFixed(2)} kW (actual ${f.actual_now_kw?.toFixed(2)} kW)` : "needs a solar sensor"],
+      ["Typical load", `${(m.load_profile_kw.reduce((a, b) => a + b, 0) / 24).toFixed(2)} kW avg · ${m.load_profile_source}`], ["Updated", ago((Date.now() / 1000) - m.fitted_at)],
     ]);
+    // outlook
     const maxE = Math.max(1, ...f.days.map((d) => Math.max(d.pv_kwh, d.load_kwh)));
-    $("#forecast-days").innerHTML = f.days.map((d) => {
-      const w = (state?.weather?.forecast || []).find((x) => x.date === d.date);
-      return `<div class="day"><div class="d">${new Date(d.date + "T12:00:00").toLocaleDateString([], { weekday: "short" })}<small>${new Date(d.date + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" })}${d.hours_covered < 24 ? ` · ${d.hours_covered} h` : ""}</small></div>
-        <div class="bars"><div class="bar"><i class="pv" style="width:${d.pv_kwh / maxE * 100}%"></i></div><div class="bar"><i class="ld" style="width:${d.load_kwh / maxE * 100}%"></i></div><small class="muted">☀ ${d.pv_kwh} · ⌂ ${d.load_kwh} kWh · ${Math.round(d.cloud_avg * 100)} % cloud${d.snow_risk ? " · ❄ snow" : ""}${w ? " · " + w.narrative : ""}</small></div>
-        <div class="net" style="color:${d.net_kwh >= 0 ? "var(--ok)" : "var(--bad)"}">${d.net_kwh >= 0 ? "+" : ""}${d.net_kwh}<small>kWh net</small></div></div>`;
+    $("#forecast-days").innerHTML = f.days.filter((d, i) => i === 0 || d.hours_covered >= 12).map((d, i) => {
+      const w = (state?.weather?.forecast || []).find((x) => x.date === d.date), dt = new Date(d.date + "T12:00:00");
+      const pos = d.net_kwh >= 0;
+      return `<div class="day">
+        <div class="day-top"><span class="d">${dt.toLocaleDateString([], { weekday: "short" })} <small>${dt.toLocaleDateString([], { month: "short", day: "numeric" })}${i === 0 && d.hours_covered < 24 ? " · rest of today" : ""}</small></span>
+          <span class="net ${pos ? "pos" : "neg"}">${pos ? "+" : "−"}${Math.abs(d.net_kwh).toFixed(1)} kWh</span></div>
+        <div class="day-bars"><span class="lab">Solar</span><div class="bar"><i class="pv" style="width:${d.pv_kwh / maxE * 100}%"></i></div><span class="val">${d.pv_kwh.toFixed(1)}</span>
+          <span class="lab">Use</span><div class="bar"><i class="ld" style="width:${d.load_kwh / maxE * 100}%"></i></div><span class="val">${d.load_kwh.toFixed(1)}</span></div>
+        <div class="day-wx">${Math.round(d.cloud_avg * 100)} % cloud${d.snow_risk ? " · snow on panels likely" : ""}${d.temp_min_c != null ? ` · low ${fT(d.temp_min_c)}` : ""}${w ? ` · ${w.narrative}` : ""}</div></div>`;
     }).join("");
-    // chart
-    const p = palette();
-    const labels = f.hours.map((h) => h.ts);
-    const hourly = (pts) => { const mm = new Map(); (pts || []).forEach(([t, s]) => { const k = Math.round(t / 3600) * 3600; if (!mm.has(k)) mm.set(k, s); }); return mm; };
+    // 72 h chart
+    const p = palette(), labels = f.hours.map((h) => h.ts);
+    const hourly = (pts) => { const mm = new Map(); (pts || []).forEach(([t, v]) => { const k = Math.floor(t / 3600) * 3600; if (!mm.has(k)) mm.set(k, v); }); return mm; };
     const base = hourly(plan?.baseline), withp = hourly(plan?.planned);
+    const run = (t) => plan?.needed && plan.start_at && t + 3600 > plan.start_at && t < plan.end_at;
     const ds = [
-      { type: "bar", label: "Solar kW", data: f.hours.map((h) => h.pv_kw), backgroundColor: p.pv + "99", yAxisID: "y", borderRadius: 2 },
-      { type: "line", label: "Load kW", data: f.hours.map((h) => h.load_kw), borderColor: p.load, yAxisID: "y", borderDash: [3, 3], borderWidth: 1.5 },
+      { type: "bar", label: "Solar forecast", data: f.hours.map((h) => h.pv_kw * 1000), backgroundColor: alpha(p.pv, 0.75), borderRadius: 3, yAxisID: "y", order: 4, barPercentage: 1, categoryPercentage: 0.82 },
+      { type: "line", label: "Expected use", data: f.hours.map((h) => h.load_kw * 1000), borderColor: alpha(p.load, 0.85), borderWidth: 1.6, yAxisID: "y", order: 3, tension: 0.4 },
     ];
     if (plan) {
-      ds.push({ type: "line", label: "SOC without", data: labels.map((t) => base.get(t) ?? null), borderColor: p.batt, borderDash: [6, 4], yAxisID: "y1", borderWidth: 1.5 });
-      ds.push({ type: "line", label: "SOC with plan", data: labels.map((t) => withp.get(t) ?? null), borderColor: p.batt, yAxisID: "y1" });
+      ds.push({ type: "bar", label: "Generator run", data: labels.map((t) => (run(t) ? 100 : null)), backgroundColor: alpha(p.gen, 0.22), yAxisID: "y1", order: 5, barPercentage: 1, categoryPercentage: 1 });
+      ds.push({ type: "line", label: "Battery, with plan", data: labels.map((t) => withp.get(t) ?? null), borderColor: p.batt, borderWidth: 2.4, yAxisID: "y1", order: 1 });
+      ds.push({ type: "line", label: "Battery, no generator", data: labels.map((t) => base.get(t) ?? null), borderColor: alpha(p.muted, 0.8), borderDash: [5, 4], borderWidth: 1.4, yAxisID: "y1", order: 2 });
+      ds.push({ type: "line", label: "_floor", data: labels.map(() => prm.soc_floor), borderColor: alpha(css("--bad"), 0.6), borderDash: [3, 4], borderWidth: 1, yAxisID: "y1", order: 2 });
     }
-    const saved = range; range = "7d";
-    const o = chartOpts("kW", { scales: { y: { ticks: { callback: (v) => v + " kW" }, grid: { color: p.line } }, y1: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { callback: (v) => v + " %" } }, x: { ticks: { maxTicksLimit: 6, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } } } });
-    if (charts["chart-forecast"]) { charts["chart-forecast"].data.labels = labels; charts["chart-forecast"].data.datasets = ds; charts["chart-forecast"].update(); }
-    else charts["chart-forecast"] = new Chart(document.getElementById("chart-forecast"), { data: { labels, datasets: ds }, options: o });
-    range = saved;
+    const o = baseOpts({ fmtY: kW, tooltipFmt: kW, yMin: 0, extraScales: {
+      y1: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, border: { display: false }, ticks: { callback: (v) => `${v}%`, maxTicksLimit: 5, color: p.muted } } } });
+    o.plugins.tooltip.callbacks.label = (it) => ` ${it.dataset.label}: ${it.dataset.yAxisID === "y1" ? (it.dataset.label === "Generator run" ? "running" : Math.round(it.raw) + " %") : kW(it.raw)}`;
+    draw("chart-forecast", labels, ds, o, 3600, "bar");
   }
   async function loadScorecard() {
     try {
       const rows = await (await fetch("/api/scorecard?days=14")).json();
       if (!rows.length) { $("#scorecard").innerHTML = '<div class="muted small">No history yet.</div>'; return; }
       const pct = (v) => (v == null ? "–" : Math.round(v * 100) + " %");
-      $("#scorecard").innerHTML = `<table><tr><th>Day</th><th class="num">Starts</th><th class="num">Run</th><th class="num">kWh</th><th class="num">kWh/h</th><th class="num">Full</th><th class="num">Floor</th><th class="num">SOC</th><th class="num">Curtailed</th></tr>` +
-        rows.map((r) => `<tr><td>${r.date.slice(5)}${r.partial_day ? "*" : ""}</td><td class="num">${r.starts}</td><td class="num">${r.run_h.toFixed(1)} h</td><td class="num">${r.kwh}</td><td class="num">${r.kwh_per_run_h ?? "–"}</td><td class="num">${pct(r.full_current_share)}</td><td class="num" style="color:${r.hours_at_floor > 0 ? "var(--bad)" : "inherit"}">${r.hours_at_floor.toFixed(1)} h</td><td class="num">${r.soc_min ?? "–"}–${r.soc_max ?? "–"}</td><td class="num" style="color:${r.curtailed_kwh > 1 ? "var(--warn)" : "inherit"}">${r.curtailed_kwh}</td></tr>`).join("") + "</table>";
+      $("#scorecard").innerHTML = `<table><tr><th>Day</th><th class="num">Starts</th><th class="num">Run</th><th class="num">kWh</th><th class="num wide">kWh/h</th><th class="num wide">Full current</th><th class="num">At floor</th><th class="num wide">SOC</th><th class="num">Wasted sun</th></tr>` +
+        rows.map((r) => `<tr><td>${r.date.slice(5)}${r.partial_day ? "*" : ""}</td><td class="num">${r.starts}</td><td class="num">${r.run_h.toFixed(1)} h</td><td class="num">${r.kwh}</td><td class="num wide">${r.kwh_per_run_h ?? "–"}</td><td class="num wide">${pct(r.full_current_share)}</td><td class="num" style="color:${r.hours_at_floor > 0 ? "var(--bad)" : "inherit"}">${r.hours_at_floor.toFixed(1)} h</td><td class="num wide">${r.soc_min != null ? Math.round(r.soc_min) : "–"}–${r.soc_max != null ? Math.round(r.soc_max) : "–"} %</td><td class="num" style="color:${r.curtailed_kwh > 1 ? "var(--warn)" : "inherit"}">${r.curtailed_kwh} kWh</td></tr>`).join("") + "</table>";
     } catch (e) { $("#scorecard").innerHTML = '<div class="muted small">unavailable</div>'; }
   }
   $("#forecast-recompute").addEventListener("click", async () => { const r = await fetch("/api/forecast/recompute", { method: "POST" }); toast(r.ok ? "Forecast recomputed" : "Recompute failed"); loadForecast(); });
