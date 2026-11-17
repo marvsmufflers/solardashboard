@@ -115,8 +115,8 @@
     const line = (id, cls, p, rev) => { const el = $("#" + id); el.className = `fl ${cls} ${p != null && Math.abs(p) > 20 ? "on" : ""} ${rev ? "rev" : ""}`; };
     line("fl-pv", "pv", pv, false); line("fl-gen", "gen", tot.generator_running ? gen : 0, false); line("fl-batt", "batt", bp, bp > 0);
     // tiles
-    $("#t-pv-e").textContent = fmt(inv.pv_energy_today, 1, "kWh"); $("#t-pv-s").textContent = invOk ? `${fmtW(inv.pv1_power)} + ${fmtW(inv.pv2_power)} now` : "inverter offline";
-    $("#t-load-e").textContent = fmt(inv.load_energy_today ?? inv.eps_energy_today, 1, "kWh"); $("#t-load-s").textContent = invOk ? `L1 ${fmtW(inv.eps_l1_power)} · L2 ${fmtW(inv.eps_l2_power)}` : "";
+    $("#t-pv-e").textContent = fmt(tot.pv_energy_today || inv.pv_energy_today, 1, "kWh"); $("#t-pv-s").textContent = invOk ? `${fmtW(inv.pv1_power)} + ${fmtW(inv.pv2_power)} now` : "inverter offline";
+    $("#t-load-e").textContent = fmt(tot.load_energy_today || inv.load_energy_today || inv.eps_energy_today, 1, "kWh"); $("#t-load-s").textContent = invOk ? `L1 ${fmtW(inv.eps_l1_power)} · L2 ${fmtW(inv.eps_l2_power)}` : "";
     const g = (tot.generators || []).find((x) => x.active) || (tot.generators || [])[0];
     $("#t-gen").textContent = tot.generator_running ? "running" : "off";
     $("#t-gen-s").textContent = g ? `${g.name.split(" (")[0]} · ${hours(g.runtime_today_h)} today${g.warming_up ? " · warming up" : ""}` : "";
@@ -179,6 +179,7 @@
 
   // ---------- inverter ----------
   function renderInverter(inv) {
+    const tot = (state && state.total) || {};
     $("#inv-status").textContent = inv.status || "offline"; $("#inv-status").className = "badge " + ((inv.faults || []).length ? "bad" : "subtle");
     kv($("#inv-live"), [
       ["PV1", `${fmt(inv.pv1_voltage, 0, "V")} · ${fmtW(inv.pv1_power)}`], ["PV2", `${fmt(inv.pv2_voltage, 0, "V")} · ${fmtW(inv.pv2_power)}`], ["Battery (inverter)", `${fmt(inv.battery_voltage, 1, "V")} · ${inv.battery_soc ?? "–"} % · ${fmtW(inv.battery_power)}`],
@@ -187,7 +188,7 @@
       ["Faults", (inv.faults || []).join(", ") || "none", (inv.faults || []).length ? "bad" : "ok"], ["Warnings", (inv.warnings || []).join(", ") || "none", (inv.warnings || []).length ? "warn" : ""],
     ]);
     kv($("#inv-energy"), [
-      ["PV today / lifetime", `${fmt(inv.pv_energy_today, 1)} / ${fmt(inv.pv_energy_total, 0)} kWh`], ["Load today", fmt(inv.load_energy_today, 1, "kWh")], ["EPS today / lifetime", `${fmt(inv.eps_energy_today, 1)} / ${fmt(inv.eps_energy_total, 0)} kWh`],
+      ["PV today / lifetime", `${fmt(tot.pv_energy_today || inv.pv_energy_today, 1)} / ${fmt(inv.pv_energy_total, 0)} kWh`], ["Load today", fmt(tot.load_energy_today || inv.load_energy_today, 1, "kWh")], ["EPS today / lifetime", `${fmt(inv.eps_energy_today, 1)} / ${fmt(inv.eps_energy_total, 0)} kWh`],
       ["Charged today / lifetime", `${fmt(inv.battery_charge_energy_today, 1)} / ${fmt(inv.battery_charge_energy_total, 0)} kWh`], ["Discharged today / lifetime", `${fmt(inv.battery_discharge_energy_today, 1)} / ${fmt(inv.battery_discharge_energy_total, 0)} kWh`],
     ]);
     kv($("#inv-bms"), [

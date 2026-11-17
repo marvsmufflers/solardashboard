@@ -63,6 +63,8 @@ class Service:
         self._named: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
         self._runtime_day: str | None = None
+        self._today_energy: dict[str, float] = {}
+        self._today_energy_at = 0.0
         self._runtime: dict[str, float] = {}  # generator name -> hours today
         self._running_prev: dict[str, bool | None] = {}
         self._raw_running: bool = False
@@ -259,6 +261,7 @@ class Service:
                     threshold_w=self.cfg.chargeverter.power_threshold_w,
                 )
                 self._track_generators()
+                await self._apply_today_energy()
                 self.state.derived["occupancy"] = self.occupancy_mode()
                 if self.mqtt is not None and hasattr(self, "_mqtt_health"):
                     h = self._mqtt_health
@@ -279,6 +282,35 @@ class Service:
             except Exception as e:  # noqa: BLE001
                 log.exception("derive loop: %s", e)
             await asyncio.sleep(1.0)
+
+    def _integrate_today(self) -> dict[str, float]:
+        """kWh since local midnight from the stored power samples (gaps > 10 min skipped)."""
+        now = time.time()
+        midnight = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        out: dict[str, float] = {}
+        for metric, key in (("total/pv_power", "pv_energy_today"), ("total/load_power", "load_energy_today")):
+            pts = self.store.query(metric, midnight, now)
+            wh = 0.0
+            for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+                dt = t1 - t0
+                if 0 < dt <= 600:
+                    wh += max(0.0, (v0 + v1) / 2) * dt / 3600
+            out[key] = round(wh / 1000, 2)
+        return out
+
+    async def _apply_today_energy(self) -> None:
+        """Use the inverter's daily counters when it fills them; otherwise our own integration."""
+        if time.time() - self._today_energy_at > 60:
+            self._today_energy_at = time.time()
+            try:
+                self._today_energy = await asyncio.to_thread(self._integrate_today)
+            except Exception as e:  # noqa: BLE001
+                log.debug("today energy: %s", e)
+        d = self.state.derived
+        for key, val in self._today_energy.items():
+            reg = d.get(key) or 0
+            if val > reg:  # some 6000XP firmware leaves these counters at 0
+                d[key] = val
 
     def _collect_sample(self) -> dict[str, Any]:
         m: dict[str, Any] = {}
