@@ -27,10 +27,10 @@ OPEN_PREFIXES = ("/healthz", "/static/", "/login", "/logout", "/favicon.ico", "/
 LOGIN_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Watts the Forecast</title><link rel="icon" href="/static/favicon.ico"><link rel="stylesheet" href="/static/style.css"><link rel="manifest" href="/static/manifest.json">
 <link rel="apple-touch-icon" href="/static/icon-180.png"><meta name="apple-mobile-web-app-capable" content="yes">
-<style>.login{max-width:360px;margin:12vh auto 0;padding:0 16px}.login .card{padding:22px}.login .hero{display:block;width:100%;height:auto;border-radius:12px;background:#fff;margin:0 0 16px}.login p{margin:0 0 14px}
+<style>.login{max-width:360px;margin:12vh auto 0;padding:0 16px}.login .card{padding:22px}.login .hero{display:block;width:100%;height:auto;border-radius:12px;margin:0 0 16px}.login p{margin:0 0 14px}
 .login input{width:100%;padding:12px 14px;font-size:17px;border-radius:12px;border:1px solid var(--line);background:var(--card-2);color:var(--text);margin-bottom:10px}
 .login button{width:100%;padding:12px;font-size:16px;font-weight:600;background:var(--accent);color:#111;border:0;border-radius:12px}.err{color:var(--bad);font-size:13px;margin-bottom:10px}</style></head>
-<body><main class="login"><div class="card"><img class="hero" src="/static/logo.webp" alt="Watts the Forecast" width="498" height="332"><p class="muted">Enter the dashboard password.</p>
+<body><main class="login"><div class="card"><picture><source srcset="/static/logo-dark.webp" media="(prefers-color-scheme: dark)"><img class="hero" src="/static/logo.webp" alt="Watts the Forecast" width="960" height="640"></picture><p class="muted">Enter the dashboard password.</p>
 {error}<form method="post" action="/login"><input type="password" name="password" autocomplete="current-password" autofocus placeholder="Password">
 <input type="hidden" name="next" value="{next}"><button type="submit">Sign in</button></form></div></main></body></html>"""
 
