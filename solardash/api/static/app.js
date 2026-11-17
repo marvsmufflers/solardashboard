@@ -79,7 +79,7 @@
     const floor = state.forecast_summary?.params?.soc_floor ?? 30;
     setGauge(soc, floor);
     const bp = tot.battery_power;
-    $("#h-soc-sub").textContent = bp == null ? "battery" : bp >= 20 ? `charging ${fmtW(bp)}` : bp <= -20 ? `discharging ${fmtW(-bp)}` : "idle";
+    $("#h-soc-sub").textContent = bp == null ? "battery" : "idle";
     // % per hour, like Solar Assistant: amps over amp-hours when the BMS gives both, else watts over kWh
     let rate = null;
     if (tot.battery_current != null && tot.battery_capacity_ah) rate = tot.battery_current / tot.battery_capacity_ah * 100;
@@ -94,19 +94,11 @@
     if (bp != null && soc != null && Math.abs(bp) > 30) {
       const target = bp < 0 ? floor : 100;
       const h = Math.abs((target - soc) / 100 * kwh * 1000 / bp);
-      $("#h-runway").textContent = h > 48 ? ">2d" : h < 1 ? `${Math.round(h * 60)}m` : h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`;
-      $("#h-runway-sub").textContent = bp < 0 ? `to ${floor} % at this load` : "to full";
-    } else { $("#h-runway").textContent = "–"; $("#h-runway-sub").textContent = soc != null ? "battery idle" : ""; }
-    // countdown ring: discharging = usable energy left above the floor; charging = how full
-    const ring = $("#rw-fill"), C = 2 * Math.PI * 28;
-    if (soc != null) {
-      const charging = bp != null && bp > 30;
-      const frac = charging ? soc / 100 : Math.max(0, Math.min(1, (soc - floor) / (100 - floor)));
-      const hrs = bp != null && Math.abs(bp) > 30 ? Math.abs(((charging ? 100 : floor) - soc) / 100 * kwh * 1000 / bp) : null;
-      ring.style.strokeDasharray = `${frac * C} ${C}`;
-      ring.setAttribute("class", "rw-fill " + (charging ? "chg" : hrs != null && hrs < 2 ? "crit" : hrs != null && hrs < 6 ? "low" : "ok"));
-      $("#h-runway-k").textContent = charging ? "Until full" : "Runway";
-    } else ring.style.strokeDasharray = `0 ${C}`;
+      const ht = h > 48 ? "over 2 days" : h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`;
+      const sub = $("#h-soc-sub");
+      sub.textContent = bp > 0 ? `${ht} to full` : `${ht} to ${floor} %`;
+      sub.className = "gauge-sub" + (bp < 0 && h < 2 ? " crit" : bp < 0 && h < 6 ? " low" : "");
+    }
     // flow
     const pv = invOk ? inv.pv_power : null, load = invOk ? tot.load_power : null, gen = tot.generator_power;
     $("#fn-pv").textContent = fmtW(pv); $("#fn-load").textContent = fmtW(load); $("#fn-gen").textContent = tot.generator_running ? fmtW(gen) : (gen == null ? "–" : "off"); $("#fn-batt").textContent = bp == null ? "–" : fmtW(Math.abs(bp));

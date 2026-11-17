@@ -53,7 +53,7 @@ class PasswordGate:
             return False
         try:
             raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-            msg, sig = raw.rsplit(b".", 1)
+            msg, sig = raw.split(b".", 1)  # msg is digits only; the binary signature may contain '.'
             issued = int(msg)
         except (ValueError, TypeError):
             return False

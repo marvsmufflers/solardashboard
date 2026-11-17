@@ -65,3 +65,14 @@ async def test_password_gate(tmp_path):
             # secrets never leak through /api/config
             d = (await c.get("/api/config", headers={"Authorization": "Bearer hunter2"})).json()
             assert d["web"]["password"] == "***"
+
+
+def test_session_cookie_always_verifies():
+    from solardash.api.auth import PasswordGate
+
+    g = PasswordGate("pw")
+    import time as _t
+
+    base = int(_t.time())
+    # every issue time over a day must round-trip (signatures with a '.' byte used to fail)
+    assert all(g.verify_cookie(g._token(base - k)) for k in range(0, 86400, 37))

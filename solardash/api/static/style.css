@@ -284,3 +284,6 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .rw-fill { stroke: var(--ok); stroke-dasharray: 0 170; transition: stroke-dasharray .8s cubic-bezier(.2,.7,.2,1), stroke .3s; }
 .rw-fill.low { stroke: var(--warn); } .rw-fill.crit { stroke: var(--bad); } .rw-fill.chg { stroke: var(--batt); }
 .runway .v { line-height: 1.1; }
+
+.gauge-sub { font-size: 14px; font-weight: 600; color: var(--text); }
+.gauge-sub.low { color: var(--warn); } .gauge-sub.crit { color: var(--bad); }
