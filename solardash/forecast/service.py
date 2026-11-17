@@ -183,7 +183,13 @@ class ForecastTask:
         lat, lon = loc
         if time.monotonic() >= self._openmeteo_due:
             self.refresh_openmeteo()
-            self._openmeteo_due = time.monotonic() + self.cfg.weather.openmeteo_interval
+            if self.openmeteo_error is None:
+                self._om_failures = 0
+                self._openmeteo_due = time.monotonic() + self.cfg.weather.openmeteo_interval
+            else:
+                # retry soon instead of waiting a full interval: 2, 5, 15 min, then every 15
+                self._om_failures = getattr(self, "_om_failures", 0) + 1
+                self._openmeteo_due = time.monotonic() + (120, 300, 900)[min(self._om_failures, 3) - 1]
         modes = self.cfg.occupancy.modes if self.cfg.occupancy.enabled else None
         if self.model is None or now - self._last_fit > 3600:
             self.model = fit_model(self.store, lat, lon, self.cfg.planner.pv_kw_peak, now=now, previous=self.model, modes=modes)
@@ -238,8 +244,11 @@ class ForecastTask:
             except Exception as e:  # noqa: BLE001
                 log.exception("forecast: %s", e)
                 self.state.forecast = {"available": False, "reason": f"{type(e).__name__}: {e}"}
+            wait = self.cfg.planner.recompute_interval
+            if self.openmeteo_error is not None:
+                wait = min(wait, max(30.0, self._openmeteo_due - time.monotonic()))
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.cfg.planner.recompute_interval)
+                await asyncio.wait_for(self._stop.wait(), timeout=wait)
             except asyncio.TimeoutError:
                 pass
 

@@ -359,12 +359,14 @@
       ]);
     }
     const src = f.sources || {}, hb = src.hours_by_source || {};
-    $("#forecast-source").textContent = hb.openmeteo ? "Open-Meteo" : hb.wunderground ? "Wunderground" : src.openmeteo_error ? "no forecast" : "assumed sky";
+    $("#forecast-source").textContent = hb.openmeteo ? "Open-Meteo" : (hb.wunderground ? "Wunderground" : "assumed sky") + (src.openmeteo_error ? " · Open-Meteo failed" : "");
+    $("#forecast-source").title = src.openmeteo_error || "";
+    $("#forecast-error").textContent = !hb.openmeteo && src.openmeteo_error ? `Open-Meteo: ${src.openmeteo_error}. Retrying automatically.` : "";
     $("#forecast-source").className = "badge " + (hb.openmeteo ? "subtle" : "warn");
     const m = f.model;
     kv($("#pv-model"), [
       ["Array output on a clear day", `${m.k_clear} kW per kW/m² (${m.k_clear_source})`], ["Forecast correction", `×${m.bias}`],
-      ["Expected now", f.expected_now_kw != null ? `${f.expected_now_kw.toFixed(2)} kW (actual ${f.actual_now_kw?.toFixed(2)} kW)` : "needs a solar sensor"],
+      ["Expected now", f.expected_now_kw != null ? `${f.expected_now_kw.toFixed(2)} kW (actual ${f.actual_now_kw?.toFixed(2)} kW)` : state?.weather?.current?.solar_radiation != null ? `learning (${m.samples_meas} of 10 sunny hours)` : "your station has no sunlight sensor"],
       ["Typical load", `${(m.load_profile_kw.reduce((a, b) => a + b, 0) / 24).toFixed(2)} kW avg · ${m.load_profile_source}`], ["Updated", ago((Date.now() / 1000) - m.fitted_at)],
     ]);
     // outlook
