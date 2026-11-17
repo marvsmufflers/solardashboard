@@ -132,7 +132,8 @@ class OccupancyConfig:
 class HistoryConfig:
     path: str = "data/solardash.db"
     sample_interval: float = 15.0
-    retention_days: int = 14
+    retention_days: int = 0  # 0 = keep raw samples until the size cap is reached
+    max_db_gb: float = 25.0  # oldest raw days roll off once the database reaches this size
 
 
 @dataclass

@@ -240,7 +240,7 @@
   }
 
   // ---------- charts ----------
-  const STEP = { "6h": 300, "24h": 600, "48h": 900, "7d": 3600, "30d": 3 * 3600 };
+  const STEP = { "6h": 300, "24h": 600, "48h": 900, "7d": 3600, "30d": 3 * 3600, "1y": 86400 };
   const kW = (v) => (v == null ? "–" : Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(Math.abs(v) >= 10000 ? 0 : 1)} kW` : `${Math.round(v)} W`);
   function timeTick(value, index) {
     const ch = this.chart, ts = ch.data.labels[index]; if (ts == null) return "";
@@ -252,6 +252,7 @@
       if (sec < step && span > 30 * 3600) return d.toLocaleDateString([], { weekday: "short" });
       return d.toLocaleTimeString([], { hour: "numeric" }).replace(":00", "");
     }
+    if (span > 100 * 86400) return d.getUTCDate() === 1 ? new Date(ts * 1000 + 43200000).toLocaleDateString([], { month: "short" }) : "";
     if (sec >= step) return "";
     if (span > 10 * 86400) return d.getDate() % 5 === 0 ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : "";
     return d.toLocaleDateString([], { weekday: "short" });

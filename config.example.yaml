@@ -109,7 +109,8 @@ occupancy:
 history:
   path: data/solardash.db
   sample_interval: 15
-  retention_days: 14     # raw samples; hourly rollups are kept forever
+  retention_days: 0      # raw samples: 0 = no age limit, only the size cap below
+  max_db_gb: 25          # oldest raw days roll off past this; hourly rollups are kept forever
 
 web:
   host: 0.0.0.0

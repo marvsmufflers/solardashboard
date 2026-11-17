@@ -76,3 +76,23 @@ def test_history_store_roundtrip_and_rollup(tmp_path):
     assert st.events()[0]["message"] == "hello"
     assert st.stats()["raw_rows"] == 20
     st.close()
+
+
+def test_size_cap_rolls_off_oldest_days_and_long_ranges_use_rollups(tmp_path):
+    import time as _t
+
+    now = int(_t.time())
+    st = HistoryStore(tmp_path / "cap.db", retention_days=0, max_bytes=0)
+    start = now - 20 * 86400
+    for ts in range(start, now, 300):
+        st.insert(ts, {f"m{i}": float(i) for i in range(20)})
+    st.rollup_and_prune(now)
+    full = st.used_bytes()
+    st.max_bytes = int(full * 0.5)
+    deleted = st.rollup_and_prune(now)
+    assert deleted > 0 and st.used_bytes() <= full * 0.5
+    oldest = st.stats()["oldest_raw_ts"]
+    assert oldest > start + 86400 and oldest < now - 2 * 86400
+    # a year chart still covers the rolled-off days from the hourly table
+    rows = st.query("m3", now - 365 * 86400, now, step=86400)
+    assert rows and rows[0][0] <= start + 86400 and all(v == 3.0 for _, v in rows)

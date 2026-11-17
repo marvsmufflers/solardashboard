@@ -3,7 +3,8 @@
 Two tables:
 
 * ``samples(ts, metric, value)`` — raw samples at the configured interval,
-  kept for ``retention_days``.
+  kept for ``retention_days`` (0 = no age limit) and, oldest first, only as
+  long as the database stays under ``max_bytes``.
 * ``hourly(ts, metric, avg, min, max, n)`` — hourly rollups, kept forever.
 
 ``query`` picks the right table for the requested range and optionally
@@ -52,9 +53,10 @@ CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
 
 
 class HistoryStore:
-    def __init__(self, path: str | Path, retention_days: int = 14) -> None:
+    def __init__(self, path: str | Path, retention_days: int = 0, max_bytes: int = 0) -> None:
         self.path = str(path)
         self.retention_days = retention_days
+        self.max_bytes = max_bytes
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
@@ -131,7 +133,31 @@ class HistoryStore:
                 cur = self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
                 deleted = cur.rowcount
             self._conn.execute("DELETE FROM events WHERE ts < ?", (int(now - 90 * 86400),))
+            deleted += self._prune_to_size(now)
         self._last_rollup = now
+        return deleted
+
+    def used_bytes(self) -> int:
+        """Bytes in use inside the database (deleted rows' pages are reused, so the file itself does not shrink)."""
+        pc = self._conn.execute("PRAGMA page_count").fetchone()[0]
+        fl = self._conn.execute("PRAGMA freelist_count").fetchone()[0]
+        ps = self._conn.execute("PRAGMA page_size").fetchone()[0]
+        return (pc - fl) * ps
+
+    def _prune_to_size(self, now: float) -> int:
+        """Drop the oldest raw days until the database is back under 95 % of ``max_bytes``.
+        Hourly rollups are tiny and are kept, so long-range charts still work."""
+        if self.max_bytes <= 0 or self.path == ":memory:":
+            return 0
+        deleted = 0
+        for _ in range(400):  # bounded: at most ~one year of days per pass
+            if self.used_bytes() <= self.max_bytes * 0.95:
+                break
+            oldest = self._conn.execute("SELECT MIN(ts) FROM samples").fetchone()[0]
+            if oldest is None or oldest > now - 2 * 86400:
+                break  # never touch the last two days
+            cur = self._conn.execute("DELETE FROM samples WHERE ts < ?", (int(oldest) + 86400,))
+            deleted += cur.rowcount
         return deleted
 
     def maybe_rollup(self, every: float = 3600.0) -> None:
@@ -146,14 +172,26 @@ class HistoryStore:
         ``step`` (seconds) averages raw samples into buckets.
         """
         start, end = int(start), int(end)
-        raw_floor = int(time.time() - self.retention_days * 86400) if self.retention_days > 0 else 0
         rows: list[tuple[int, float]] = []
         with self._lock:
+            oldest = self._conn.execute("SELECT MIN(ts) FROM samples WHERE metric=?", (metric,)).fetchone()[0]
+            raw_floor = int(oldest) if oldest is not None else int(time.time())
+            if self.retention_days > 0:
+                raw_floor = max(raw_floor, int(time.time() - self.retention_days * 86400))
+            if end - start > 35 * 86400 and step and step >= 3600:
+                # long ranges come from hourly rollups: much faster than grouping months of raw rows
+                raw_floor = max(raw_floor, int(time.time()) - 86400)
             if start < raw_floor:
-                cur = self._conn.execute(
-                    "SELECT ts, avg FROM hourly WHERE metric=? AND ts BETWEEN ? AND ? ORDER BY ts",
-                    (metric, start, min(end, raw_floor - 1)),
-                )
+                if step and step > 3600:
+                    cur = self._conn.execute(
+                        "SELECT (ts/?)*?, AVG(avg) FROM hourly WHERE metric=? AND ts BETWEEN ? AND ? GROUP BY ts/? ORDER BY 1",
+                        (step, step, metric, start, min(end, raw_floor - 1), step),
+                    )
+                else:
+                    cur = self._conn.execute(
+                        "SELECT ts, avg FROM hourly WHERE metric=? AND ts BETWEEN ? AND ? ORDER BY ts",
+                        (metric, start, min(end, raw_floor - 1)),
+                    )
                 rows.extend((int(t), float(v)) for t, v in cur.fetchall() if v is not None)
             raw_start = max(start, raw_floor)
             if raw_start <= end:
@@ -209,4 +247,7 @@ class HistoryStore:
             n_raw = self._conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
             n_hourly = self._conn.execute("SELECT COUNT(*) FROM hourly").fetchone()[0]
             size = Path(self.path).stat().st_size if self.path != ":memory:" and Path(self.path).exists() else 0
-        return {"raw_rows": n_raw, "hourly_rows": n_hourly, "db_bytes": size, "retention_days": self.retention_days}
+            used = self.used_bytes() if self.path != ":memory:" else 0
+            oldest = self._conn.execute("SELECT MIN(ts) FROM samples").fetchone()[0]
+        return {"raw_rows": n_raw, "hourly_rows": n_hourly, "db_bytes": size, "used_bytes": used,
+                "max_bytes": self.max_bytes, "oldest_raw_ts": oldest, "retention_days": self.retention_days}

@@ -52,7 +52,7 @@ class Service:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.state = SystemState()
-        self.store = HistoryStore(cfg.history.path, cfg.history.retention_days)
+        self.store = HistoryStore(cfg.history.path, cfg.history.retention_days, int(cfg.history.max_db_gb * 1e9))
         self.inverter: InverterPoller | None = None
         self.batteries: list[BatteryPoller] = []
         self.chargeverter: ChargeverterTask | None = None
