@@ -332,3 +332,22 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .brand img.mark { width: 28px; height: 28px; border-radius: 7px; flex: none; box-shadow: 0 0 0 1px var(--line); }
 .brand .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand .the { font-weight: 500; color: var(--muted); }
+
+
+/* ===== light theme: more contrast ===== */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #e6eaf0; --bg-2: #dde2e9; --card: #ffffff; --card-2: #f1f4f8; --line: #cfd6e0; --text: #0e1621; --muted: #4a5668;
+    --accent: #d99800; --pv: #d99800; --warn: #c27d00; --load: #2563eb; --batt: #16a34a; --accent-2: #16a34a; --ok: #16a34a; --gen: #7c3aed; --cv: #e11d48; --bad: #dc2626;
+  }
+  :root:not([data-theme="dark"]) body { background: var(--bg); }
+}
+:root[data-theme="light"] {
+    --bg: #e6eaf0; --bg-2: #dde2e9; --card: #ffffff; --card-2: #f1f4f8; --line: #cfd6e0; --text: #0e1621; --muted: #4a5668;
+    --accent: #d99800; --pv: #d99800; --warn: #c27d00; --load: #2563eb; --batt: #16a34a; --accent-2: #16a34a; --ok: #16a34a; --gen: #7c3aed; --cv: #e11d48; --bad: #dc2626;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) :is(.card, .tile, .pack) { border-color: var(--line); box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 6px 18px -10px rgba(15,23,42,.25); }
+  :root:not([data-theme="dark"]) :is(.top, .tabbar) { border-color: var(--line); }
+  :root:not([data-theme="dark"]) .tabbar { background: color-mix(in srgb, var(--card) 92%, transparent); }
+}
