@@ -406,7 +406,7 @@
       <div class="su-group"><h3>Generators on the cam switch</h3><div class="su-rows" id="su-gens">${d.sections.generators.values.map(genRow).join("")}</div><button class="btn" type="button" id="su-gen-add">+ Generator</button></div>
       <div class="su-group"><h3>Weather Underground station (optional)</h3>${fld("weather", "enabled", "Use my station", "bool", w.enabled)}
         <div class="su-grid" style="margin-top:8px">${fld("weather", "station_id", "Station ID", "text", w.station_id, { ph: "KCOxxxxx" })}${fld("weather", "api_key", "API key", "password", w.api_key)}</div></div>
-      <div class="su-group"><h3>Home Assistant / MQTT (optional)</h3>${fld("mqtt", "enabled", "Publish to MQTT", "bool", m.enabled)}
+      <div class="su-group"><h3>Home Assistant / MQTT (optional)</h3>${fld("mqtt", "enabled", "Publish to MQTT", "bool", m.enabled)}<div class="su-note" id="mqtt-status"></div>
         <div class="su-grid" style="margin-top:8px">${fld("mqtt", "host", "Broker address", "text", m.host)}${fld("mqtt", "port", "Port", "number", m.port)}${fld("mqtt", "username", "Username", "text", m.username)}${fld("mqtt", "password", "Password", "password", m.password)}</div></div>
       <div class="su-group su-adv"><details><summary>Advanced</summary><div class="su-grid" style="margin-top:8px">
         ${fld("inverter", "baud", "Inverter baud", "number", inv.baud)}${fld("inverter", "unit", "Inverter Modbus ID", "number", inv.unit)}${fld("inverter", "poll_interval", "Inverter poll (s)", "number", inv.poll_interval)}${fld("planner", "battery_kwh", "Battery kWh (blank = auto)", "number", pl.battery_kwh)}
@@ -465,7 +465,15 @@
   $("#setup-save").addEventListener("click", saveSetupAll);
 
   // ---------- system ----------
+  function renderMqttStatus() {
+    const el = $("#mqtt-status"); if (!el) return;
+    const d = state?.devices?.["mqtt:broker"];
+    if (!d) { el.textContent = ""; return; }
+    el.innerHTML = d.connected ? `<span style="color:var(--ok)">● Connected to ${d.port}</span> · ${d.stats?.discovered ?? 0} entities sent to Home Assistant`
+      : `<span style="color:var(--bad)">● Not connected</span>${d.last_error ? ` · ${d.last_error}` : " · trying…"}`;
+  }
   function renderSystem() {
+    renderMqttStatus();
     const dv = state?.devices || {};
     $("#devices").innerHTML = Object.values(dv).map((d) => `<div class="dev ${d.connected ? "ok" : ""}"><span class="dot"></span><div class="n">${d.name}<small>${d.kind} · <code>${d.port}</code>${d.last_error ? ` · ${d.last_error}` : ""}</small></div><div class="m">${d.connected ? ago(d.seconds_since_ok) : "down"}<br>${d.poll_count} / ${d.error_count} err</div></div>`).join("");
     const w = state?.weather || {}, c = w.current;

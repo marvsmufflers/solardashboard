@@ -194,6 +194,8 @@ class MqttPublisher:
         c.on_connect = self._on_connect
         c.on_disconnect = self._on_disconnect
         c.on_message = self._on_message
+        c.on_connect_fail = self._on_connect_fail
+        self._connect_started = time.monotonic()
         c.reconnect_delay_set(min_delay=1, max_delay=60)
         c.connect_async(self.cfg.host, self.cfg.port, keepalive=60)
         c.loop_start()
@@ -203,10 +205,28 @@ class MqttPublisher:
     def availability_topic(self) -> str:
         return f"{self.cfg.prefix}/solardash/status"
 
+    def _explain(self, reason) -> str:
+        r = str(reason).lower()
+        where = f"{self.cfg.host}:{self.cfg.port}"
+        if "not authorized" in r or "bad user" in r or "password" in r:
+            return f"Broker at {where} rejected the username or password."
+        if "refused" in r and "connection" in r:
+            return f"Nothing is listening at {where}. Check the address and that the Mosquitto add-on is running."
+        if "name or service" in r or "nodename" in r or "getaddrinfo" in r:
+            return f"Can't find a host named {self.cfg.host}. Use Home Assistant's IP address."
+        if "timed out" in r or "unreachable" in r:
+            return f"No answer from {where}. Check the address and that the NAS can reach it."
+        return f"Broker at {where}: {reason}"
+
+    def _on_connect_fail(self, client, userdata) -> None:
+        self.connected = False
+        self.last_error = self.last_error or f"No answer from {self.cfg.host}:{self.cfg.port}. Check the address and port."
+        log.warning("mqtt: %s", self.last_error)
+
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         if getattr(reason_code, "is_failure", False):
             self.connected = False
-            self.last_error = f"connect refused: {reason_code}"
+            self.last_error = self._explain(reason_code)
             log.warning("mqtt: %s", self.last_error)
             return
         self.connected = True
@@ -396,6 +416,15 @@ class MqttPublisher:
             for key, val in (cvd.get("last_reply") or {}).items():
                 self._emit("chargeverter_1", "Chargeverter", f"reported_{key}", val)
 
+    def _probe(self) -> str:
+        import socket
+
+        try:
+            with socket.create_connection((self.cfg.host, int(self.cfg.port)), timeout=4):
+                return f"Reached {self.cfg.host}:{self.cfg.port} but the broker did not accept the session. Check username and password."
+        except OSError as e:
+            return self._explain(e)
+
     def published_topics(self) -> list[str]:
         return sorted(self._last)
 
@@ -414,7 +443,16 @@ class MqttPublisher:
             log.error("mqtt: cannot start client: %s", e)
             self.last_error = str(e)
             return
+        try:
+            await self._loop()
+        finally:
+            self.close()  # also on cancel: never leave a second client with the same id running
+
+    async def _loop(self) -> None:
         while not self._stop.is_set():
+            if not self.connected and not self.last_error and time.monotonic() - self._connect_started > 12:
+                # paho retries silently; probe once so the UI can say why
+                self.last_error = self._probe()
             try:
                 if self.connected:
                     self.publish_snapshot()
@@ -424,7 +462,6 @@ class MqttPublisher:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.cfg.publish_interval)
             except asyncio.TimeoutError:
                 pass
-        self.close()
 
     def close(self) -> None:
         if self._client is not None:
