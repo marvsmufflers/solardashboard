@@ -146,6 +146,7 @@ class Service:
                                       signal_topics=topics, on_signal=self.set_generator_signal,
                                       extra_values=lambda: plan_mqtt_values(self.state.forecast),
                                       on_occupancy=self.set_occupancy)
+            self.mqtt._occupancy_modes = cfg.occupancy.modes if cfg.occupancy.enabled else []
             from .state import DeviceHealth
 
             self._mqtt_health = DeviceHealth(name="MQTT broker", kind="mqtt", port=f"{cfg.mqtt.host}:{cfg.mqtt.port}")

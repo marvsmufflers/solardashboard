@@ -365,7 +365,27 @@ class MqttPublisher:
             self._new_since_flush = True
         self._pub(topic, value)
 
+    def _discover_occupancy_select(self) -> None:
+        """Occupancy as a Home Assistant select entity (dropdown + automations)."""
+        topic = f"{self.cfg.prefix}/total/occupancy/state"
+        key = "select:" + topic
+        modes = self.occupancy_modes()
+        if not self.cfg.ha_discovery or key in self._discovered or self._client is None or not modes:
+            return
+        self._discovered.add(key)
+        payload = {
+            "name": "Cabin occupancy", "unique_id": "solardash_occupancy", "object_id": "solardash_occupancy",
+            "state_topic": topic, "command_topic": f"{self.cfg.prefix}/occupancy/set", "options": modes,
+            "availability_topic": self.availability_topic, "icon": "mdi:home-account",
+            "device": {"identifiers": ["solardash_total"], "name": "Totals", "manufacturer": "solardash", "model": "solardash"},
+        }
+        self._raw_publish(f"{self.cfg.ha_prefix}/select/solardash_occupancy/config", json.dumps(payload), retain=True)
+
+    def occupancy_modes(self) -> list[str]:
+        return list(getattr(self, "_occupancy_modes", []) or [])
+
     def publish_snapshot(self) -> None:
+        self._discover_occupancy_select()
         st = self.state
         inv = st.inverter
         if inv:
