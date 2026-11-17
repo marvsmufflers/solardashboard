@@ -6,6 +6,12 @@
   const fmt = (v, d = 1, u = "") => (v == null || Number.isNaN(v) ? "–" : (typeof v === "number" ? v.toFixed(d) : v) + (u ? " " + u : ""));
   const ago = (s) => (s == null ? "" : s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${(s / 3600).toFixed(1)}h ago`);
   const fmtDT = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  // display units (Setup → Display), from the live state; default Fahrenheit
+  const U = () => state?.display || { temperature: "F", wind: "mph", rain: "in" };
+  const tC = (c) => (c == null || Number.isNaN(+c) ? null : U().temperature === "F" ? c * 9 / 5 + 32 : +c);
+  const TU = () => (U().temperature === "F" ? "°F" : "°C");
+  const fT = (c, d = 0) => (tC(c) == null ? "–" : tC(c).toFixed(d) + " " + TU());
+  const fTr = (a, b) => (a == null ? null : `${tC(a).toFixed(0)}–${tC(b).toFixed(0)} ${TU()}`);
   const hours = (h) => (h == null ? "–" : h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`);
   const TABS = [["home", "i-home", "Home"], ["battery", "i-battery", "Battery"], ["generator", "i-bolt", "Generator"], ["inverter", "i-wave", "Inverter"], ["system", "i-sliders", "Setup"]];
   let state = null, range = "24h", settingsLoaded = false, ws, tab = "home";
@@ -88,7 +94,7 @@
     re.textContent = rate == null ? "" : `${rate >= 0 ? "+" : "−"}${Math.abs(rate).toFixed(1)} %/h`;
     re.className = "gauge-rate " + (rate == null || Math.abs(rate) < 0.05 ? "" : rate > 0 ? "up" : "down");
     $("#h-batt").textContent = tot.battery_voltage != null ? `${tot.battery_voltage.toFixed(1)} V` : "–";
-    $("#h-batt-sub").textContent = tot.battery_current != null ? `${tot.battery_current.toFixed(1)} A · ${fmt(tot.battery_temperature, 0, "°C")} · ${tot.battery_count ?? 0} packs` : (tot.battery_source === "inverter" ? "inverter estimate" : "no BMS data");
+    $("#h-batt-sub").textContent = tot.battery_current != null ? `${tot.battery_current.toFixed(1)} A · ${fT(tot.battery_temperature)} · ${tot.battery_count ?? 0} packs` : (tot.battery_source === "inverter" ? "inverter estimate" : "no BMS data");
     // runway: time to 30 % at current rate (or to full)
     const kwh = (state.forecast_summary?.params?.battery_kwh) || (tot.battery_capacity_ah ? tot.battery_capacity_ah * 51.2 / 1000 : 15.36);
     if (bp != null && soc != null && Math.abs(bp) > 30) {
@@ -115,7 +121,7 @@
     $("#t-gen").textContent = tot.generator_running ? "running" : "off";
     $("#t-gen-s").textContent = g ? `${g.name.split(" (")[0]} · ${hours(g.runtime_today_h)} today${g.warming_up ? " · warming up" : ""}` : "";
     const w = state.weather?.current;
-    $("#t-wx").textContent = w ? `${w.temperature_c?.toFixed(0)} °C` : (state.weather?.station_id ? "…" : "–");
+    $("#t-wx").textContent = w ? fT(w.temperature_c) : (state.weather?.station_id ? "…" : "–");
     $("#t-wx-s").textContent = w ? `${w.solar_radiation != null ? Math.round(w.solar_radiation) + " W/m² · " : ""}${w.humidity != null ? Math.round(w.humidity) + " % RH" : ""}` : (state.weather?.error ? "station error" : "no station");
     // plan mini
     const fp = state.forecast_summary?.plan;
@@ -155,7 +161,7 @@
       ["SOC spread", tot.battery_soc_min != null ? `${tot.battery_soc_min}–${tot.battery_soc_max} %` : null],
       ["Cell min / max", tot.battery_cell_voltage_min != null ? `${tot.battery_cell_voltage_min.toFixed(3)} / ${tot.battery_cell_voltage_max.toFixed(3)} V` : null],
       ["Worst imbalance", fmt(tot.battery_cell_imbalance_max, 3, "V"), tot.battery_cell_imbalance_max > 0.05 ? "warn" : ""],
-      ["Temperature", tot.battery_temperature_min != null ? `${tot.battery_temperature_min}–${tot.battery_temperature_max} °C` : null],
+      ["Temperature", fTr(tot.battery_temperature_min, tot.battery_temperature_max)],
       ["Protection", (tot.battery_protection_active || []).join(", ") || "none", (tot.battery_protection_active || []).length ? "bad" : "ok"],
     ]);
     $("#packs").innerHTML = (state.batteries || []).map((b) => {
@@ -166,7 +172,7 @@
         <div class="pack-soc">${b.soc ?? "–"} %<small>${fmt(b.voltage, 2, "V")} · ${fmt(b.current, 1, "A")}</small></div>
         <div class="bar"><i style="width:${b.soc || 0}%"></i></div>
         <div class="cells">${bars}</div>
-        <div class="pack-meta"><span>cells <b>${fmt(mn, 3)}–${fmt(mx, 3)}</b> Δ <b>${fmt(b.cell_imbalance, 3)}</b></span><span>temp <b>${(b.temperatures || []).length ? Math.min(...b.temperatures).toFixed(0) + "–" + Math.max(...b.temperatures).toFixed(0) : "–"} °C</b></span><span>cycles <b>${b.cycles ?? "–"}</b></span><span>${b.remaining_ah != null ? `<b>${b.remaining_ah}</b> / ${b.nominal_ah} Ah` : ""}</span>${(b.protection || []).length ? `<span style="color:var(--bad)">${b.protection.join(", ")}</span>` : ""}${!b.charge_fet_on || !b.discharge_fet_on ? `<span style="color:var(--warn)">FET chg ${b.charge_fet_on ? "on" : "OFF"} / dis ${b.discharge_fet_on ? "on" : "OFF"}</span>` : ""}</div></div>`;
+        <div class="pack-meta"><span>cells <b>${fmt(mn, 3)}–${fmt(mx, 3)}</b> Δ <b>${fmt(b.cell_imbalance, 3)}</b></span><span>temp <b>${(b.temperatures || []).length ? fTr(Math.min(...b.temperatures), Math.max(...b.temperatures)) : "–"}</b></span><span>cycles <b>${b.cycles ?? "–"}</b></span><span>${b.remaining_ah != null ? `<b>${b.remaining_ah}</b> / ${b.nominal_ah} Ah` : ""}</span>${(b.protection || []).length ? `<span style="color:var(--bad)">${b.protection.join(", ")}</span>` : ""}${!b.charge_fet_on || !b.discharge_fet_on ? `<span style="color:var(--warn)">FET chg ${b.charge_fet_on ? "on" : "OFF"} / dis ${b.discharge_fet_on ? "on" : "OFF"}</span>` : ""}</div></div>`;
     }).join("") || '<div class="card muted">No batteries configured.</div>';
   }
 
@@ -176,7 +182,7 @@
     kv($("#inv-live"), [
       ["PV1", `${fmt(inv.pv1_voltage, 0, "V")} · ${fmtW(inv.pv1_power)}`], ["PV2", `${fmt(inv.pv2_voltage, 0, "V")} · ${fmtW(inv.pv2_power)}`], ["Battery (inverter)", `${fmt(inv.battery_voltage, 1, "V")} · ${inv.battery_soc ?? "–"} % · ${fmtW(inv.battery_power)}`],
       ["AC output", `${fmt(inv.eps_voltage, 0, "V")} ${fmt(inv.eps_frequency, 2, "Hz")} · ${fmtW(inv.eps_power)}`], ["L1 / L2", `${fmt(inv.eps_l1_voltage, 0, "V")} ${fmtW(inv.eps_l1_power)} · ${fmt(inv.eps_l2_voltage, 0, "V")} ${fmtW(inv.eps_l2_power)}`], ["Load", fmtW(inv.load_power)],
-      ["AC input (unused)", `${inv.ac_input_live ? "LIVE" : "dead"} · ${fmt(inv.ac_input_voltage, 0, "V")}`, inv.ac_input_live ? "warn" : ""], ["Temperatures", `in ${fmt(inv.temperature_inner, 0)} · rad ${fmt(inv.temperature_radiator_1, 0)} / ${fmt(inv.temperature_radiator_2, 0)} °C`],
+      ["AC input (unused)", `${inv.ac_input_live ? "LIVE" : "dead"} · ${fmt(inv.ac_input_voltage, 0, "V")}`, inv.ac_input_live ? "warn" : ""], ["Temperatures", `in ${fT(inv.temperature_inner)} · rad ${fT(inv.temperature_radiator_1)} / ${fT(inv.temperature_radiator_2)}`],
       ["Faults", (inv.faults || []).join(", ") || "none", (inv.faults || []).length ? "bad" : "ok"], ["Warnings", (inv.warnings || []).join(", ") || "none", (inv.warnings || []).length ? "warn" : ""],
     ]);
     kv($("#inv-energy"), [
@@ -185,7 +191,7 @@
     ]);
     kv($("#inv-bms"), [
       ["Packs / capacity", `${inv.battery_parallel_count ?? "–"} · ${fmt(inv.battery_capacity_ah, 0, "Ah")}`], ["Max charge / discharge", `${fmt(inv.bms_max_charge_current, 0)} / ${fmt(inv.bms_max_discharge_current, 0)} A`], ["Charge V ref / cut-off", `${fmt(inv.bms_charge_voltage_ref, 1)} / ${fmt(inv.bms_discharge_cutoff_voltage, 1)} V`],
-      ["Cell min / max", `${fmt(inv.bms_cell_voltage_min, 3)} / ${fmt(inv.bms_cell_voltage_max, 3)} V`], ["Cell temp min / max", `${fmt(inv.bms_cell_temp_min, 1)} / ${fmt(inv.bms_cell_temp_max, 1)} °C`], ["BMS fault / warning", `${inv.bms_fault_code ?? "–"} / ${inv.bms_warning_code ?? "–"}`],
+      ["Cell min / max", `${fmt(inv.bms_cell_voltage_min, 3)} / ${fmt(inv.bms_cell_voltage_max, 3)} V`], ["Cell temp min / max", `${fT(inv.bms_cell_temp_min, 1)} / ${fT(inv.bms_cell_temp_max, 1)}`], ["BMS fault / warning", `${inv.bms_fault_code ?? "–"} / ${inv.bms_warning_code ?? "–"}`],
     ]);
     const s = state.settings || {};
     kv($("#inv-diag"), [
@@ -256,11 +262,11 @@
     const s = await fetchSeries(keys, "24h"); const { labels, cols } = align(s, keys); const ds = [];
     const colors = [p.batt, p.load, p.pv, p.gen, p.cv, "#1fa3a3"];
     for (let i = 0; i < n; i++) {
-      ds.push({ label: `Pack ${i + 1} °C`, data: cols[2 * i], borderColor: colors[i % 6], yAxisID: "y" });
+      ds.push({ label: `Pack ${i + 1} ${TU()}`, data: cols[2 * i].map(tC), borderColor: colors[i % 6], yAxisID: "y" });
       ds.push({ label: `Pack ${i + 1} Δ`, data: cols[2 * i + 1], borderColor: colors[i % 6], borderDash: [4, 3], yAxisID: "y1" });
     }
     const saved = range; range = "24h";
-    upsert("chart-batt", labels, ds, "", { scales: { y: { ticks: { callback: (v) => +(+v).toFixed(1) + " °C" } }, y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: (v) => +(+v).toFixed(3) + " V" } }, x: { ticks: { maxTicksLimit: 6, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } } } });
+    upsert("chart-batt", labels, ds, "", { scales: { y: { ticks: { callback: (v) => +(+v).toFixed(1) + " " + TU() } }, y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { callback: (v) => +(+v).toFixed(3) + " V" } }, x: { ticks: { maxTicksLimit: 6, callback: function (v) { return fmtTs(this.getLabelForValue(v)); } }, grid: { display: false } } } });
     range = saved;
   }
 
@@ -395,6 +401,10 @@
       <div class="su-group"><h3>Cabin location</h3><div class="su-grid">
         ${fld("weather", "latitude", "Latitude", "number", w.latitude, { ph: "39.1234" })}${fld("weather", "longitude", "Longitude", "number", w.longitude, { ph: "-105.1234" })}</div>
         <div class="su-note">Needed for the solar forecast and generator plan.</div></div>
+      <div class="su-group"><h3>Display units</h3><div class="su-grid">
+        <div class="field"><label for="su-display-temperature">Temperature</label><select id="su-display-temperature" data-sec="display" data-key="temperature" data-kind="text">${["F", "C"].map((u) => `<option value="${u}" ${d.sections.display.values.temperature === u ? "selected" : ""}>°${u}</option>`).join("")}</select></div>
+        <div class="field"><label for="su-display-wind">Wind</label><select id="su-display-wind" data-sec="display" data-key="wind" data-kind="text">${["mph", "km/h"].map((u) => `<option ${d.sections.display.values.wind === u ? "selected" : ""}>${u}</option>`).join("")}</select></div>
+        <div class="field"><label for="su-display-rain">Rain</label><select id="su-display-rain" data-sec="display" data-key="rain" data-kind="text">${["in", "mm"].map((u) => `<option ${d.sections.display.values.rain === u ? "selected" : ""}>${u}</option>`).join("")}</select></div></div></div>
       <div class="su-group"><h3>Solar, battery, generator</h3><div class="su-grid">
         ${fld("planner", "pv_kw_peak", "Solar array (kW)", "number", pl.pv_kw_peak)}${fld("planner", "generator_dc_kw", "Generator charge (kW)", "number", pl.generator_dc_kw)}
         ${fld("planner", "soc_floor", "Start generator at (%)", "number", pl.soc_floor)}${fld("planner", "soc_target", "Stop at (%)", "number", pl.soc_target)}
@@ -480,8 +490,10 @@
     $("#devices").innerHTML = Object.values(dv).map((d) => `<div class="dev ${d.connected ? "ok" : ""}"><span class="dot"></span><div class="n">${d.name}<small>${d.kind} · <code>${d.port}</code>${d.last_error ? ` · ${d.last_error}` : ""}</small></div><div class="m">${d.connected ? ago(d.seconds_since_ok) : "down"}<br>${d.poll_count} / ${d.error_count} err</div></div>`).join("");
     const w = state?.weather || {}, c = w.current;
     kv($("#weather-now"), c ? [
-      ["Station", `${c.station_id} · ${ago(c.age_s)}`], ["Temperature", fmt(c.temperature_c, 1, "°C")], ["Humidity", fmt(c.humidity, 0, "%")], ["Solar radiation", c.solar_radiation != null ? fmt(c.solar_radiation, 0, "W/m²") : "no sensor"],
-      ["UV", c.uv], ["Wind", `${fmt(c.wind_kph, 0, "km/h")} gust ${fmt(c.wind_gust_kph, 0)}`], ["Pressure", fmt(c.pressure_hpa, 1, "hPa")], ["Rain today", fmt(c.precip_total_mm, 1, "mm")],
+      ["Station", `${c.station_id} · ${ago(c.age_s)}`], ["Temperature", fT(c.temperature_c, 1)], ["Humidity", fmt(c.humidity, 0, "%")], ["Solar radiation", c.solar_radiation != null ? fmt(c.solar_radiation, 0, "W/m²") : "no sensor"],
+      ["UV", c.uv], ["Wind", U().wind === "mph" ? `${fmt(c.wind_kph != null ? c.wind_kph / 1.609 : null, 0, "mph")} gust ${fmt(c.wind_gust_kph != null ? c.wind_gust_kph / 1.609 : null, 0)}` : `${fmt(c.wind_kph, 0, "km/h")} gust ${fmt(c.wind_gust_kph, 0)}`],
+      ["Pressure", U().temperature === "F" ? fmt(c.pressure_hpa != null ? c.pressure_hpa / 33.8639 : null, 2, "inHg") : fmt(c.pressure_hpa, 1, "hPa")],
+      ["Rain today", U().rain === "in" ? fmt(c.precip_total_mm != null ? c.precip_total_mm / 25.4 : null, 2, "in") : fmt(c.precip_total_mm, 1, "mm")],
       ["Forecast", w.forecast?.length ? `${w.forecast.length} days · ${ago((Date.now() / 1000) - w.forecast_updated)}` : "none yet"],
     ] : [["Status", w.error || (w.station_id ? "waiting for data" : "not configured")]]);
     const cv = state?.chargeverter || {}; const tot = state?.total || {};

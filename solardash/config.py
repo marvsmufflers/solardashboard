@@ -115,6 +115,13 @@ class PlannerConfig:
 
 
 @dataclass
+class DisplayConfig:
+    temperature: str = "F"  # F or C
+    wind: str = "mph"  # mph or km/h
+    rain: str = "in"  # in or mm
+
+
+@dataclass
 class OccupancyConfig:
     enabled: bool = True
     modes: list[str] = field(default_factory=lambda: ["occupied", "away"])
@@ -168,6 +175,7 @@ class Config:
     weather: WeatherConfig = field(default_factory=WeatherConfig)
     planner: PlannerConfig = field(default_factory=PlannerConfig)
     occupancy: OccupancyConfig = field(default_factory=OccupancyConfig)
+    display: DisplayConfig = field(default_factory=DisplayConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     web: WebConfig = field(default_factory=WebConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
@@ -199,6 +207,7 @@ OVERRIDABLE_SECTIONS: dict[str, Any] = {
     "weather": WeatherConfig,
     "planner": PlannerConfig,
     "occupancy": OccupancyConfig,
+    "display": DisplayConfig,
     "mqtt": MqttConfig,
     "generators": GeneratorConfig,  # list section
 }
@@ -285,6 +294,9 @@ def _check_ranges(section: str, obj) -> None:
     if section == "occupancy":
         if not obj.modes or obj.default not in obj.modes:
             raise ValueError("default mode must be one of the modes")
+    if section == "display":
+        if obj.temperature not in ("F", "C") or obj.wind not in ("mph", "km/h") or obj.rain not in ("in", "mm"):
+            raise ValueError("temperature F/C, wind mph or km/h, rain in or mm")
     if section == "mqtt" and not 1 <= obj.port <= 65535:
         raise ValueError("port must be 1-65535")
     if section == "inverter":
@@ -380,6 +392,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         weather=_build(WeatherConfig, raw.get("weather")),
         planner=_build(PlannerConfig, raw.get("planner")),
         occupancy=_build(OccupancyConfig, raw.get("occupancy")),
+        display=_build(DisplayConfig, raw.get("display")),
         history=_build(HistoryConfig, raw.get("history")),
         web=_build(WebConfig, raw.get("web")),
         mqtt=_build(MqttConfig, raw.get("mqtt")),

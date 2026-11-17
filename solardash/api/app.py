@@ -121,6 +121,7 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
     @app.get("/api/state")
     async def api_state():
         snap = svc.state.snapshot()
+        snap["display"] = asdict(cfg.display)
         snap["inverter"].pop("_raw", None)
         return snap
 
@@ -381,6 +382,7 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
 
 def _ws_payload(svc: Service) -> dict:
     snap = svc.state.snapshot()
+    snap["display"] = asdict(svc.cfg.display)
     snap["inverter"].pop("_raw", None)
     return snap
 
