@@ -141,8 +141,8 @@ def test_cam_switch_on_hand_start_generator_never_triggers_automation():
     on_outhouse = guard_for_cam_switch(dict(plan), cfg, outhouse.name)
     assert on_outhouse["recommended_now"] and not on_outhouse["manual_generator"]
     on_porch = guard_for_cam_switch(dict(plan), cfg, porch.name)
-    assert on_porch["recommended_now"] is False and on_porch["manual_start_now"] is True
-    assert "by hand" in on_porch["reason"]
+    assert on_porch["recommended_now"] is False and on_porch["manual_generator"] == porch.name
+    assert "no start or stop signals" in on_porch["reason"]
     mq = plan_mqtt_values({"available": True, "plan": on_porch})
     assert mq["plan/recommended_now"] is False and mq["plan/stop_recommended"] is False
     # a running porch generator never makes HA "stop" the outhouse one either

@@ -296,8 +296,8 @@ def is_auto_start(g) -> bool:
 
 
 def guard_for_cam_switch(plan: dict[str, Any], cfg, active: str | None) -> dict[str, Any]:
-    """Never ask Home Assistant to start (or stop) the auto-start generator while the cam switch
-    feeds the Chargeverter from a generator it cannot control; tell the people instead."""
+    """While the cam switch feeds the Chargeverter from a generator Home Assistant does not control
+    (the porch one), send no start or stop signals at all; the owner runs that generator."""
     autos = [g.name for g in cfg.generators if is_auto_start(g)] or [g.name for g in cfg.generators[:1]]
     gen = next((g for g in cfg.generators if g.name == active), None)
     if gen is None or gen.name in autos:
@@ -305,12 +305,8 @@ def guard_for_cam_switch(plan: dict[str, Any], cfg, active: str | None) -> dict[
         return plan
     short = active.split(" (")[0]
     plan["manual_generator"] = active
-    if plan.get("recommended_now"):
-        plan["reason"] = f"The cam switch is set to {short}, which has to be started by hand: start it now. " + plan["reason"]
-    elif plan.get("stop_recommended"):
-        plan["reason"] = f"Stop the {short} by hand now. " + plan["reason"]
-    elif plan.get("needed"):
-        plan["reason"] = f"The cam switch is set to {short}; this run has to be started by hand. " + plan["reason"]
+    if plan.get("needed"):
+        plan["reason"] = f"Cam switch is on {short}: no start or stop signals go to Home Assistant. " + plan["reason"]
     plan["manual_start_now"] = bool(plan.get("recommended_now"))
     plan["manual_stop_now"] = bool(plan.get("stop_recommended"))
     plan["recommended_now"] = False
