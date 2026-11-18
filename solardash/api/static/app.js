@@ -82,7 +82,7 @@
   function renderHome(inv, tot, invOk) {
     const soc = tot.battery_state_of_charge;
     $("#h-soc").textContent = soc == null ? "–" : Math.round(soc);
-    const floor = state.forecast_summary?.params?.soc_floor ?? 30;
+    const floor = state.forecast_summary?.params?.soc_floor ?? 25;
     setGauge(soc, floor);
     const bp = tot.battery_power;
     $("#h-soc-sub").textContent = bp == null ? "battery" : "idle";
