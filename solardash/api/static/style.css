@@ -62,7 +62,6 @@ main { max-width: 1180px; margin: 0 auto; padding: 14px 16px calc(var(--tabbar) 
 .gauge { width: 100%; height: 100%; transform: rotate(135deg); }
 .gauge circle { fill: none; stroke-width: 14; stroke-linecap: round; }
 .gauge-track { stroke: var(--line); stroke-dasharray: 405 540; }
-.gauge-floor { stroke: var(--bad); stroke-width: 22; stroke-linecap: butt; stroke-dasharray: 0 540; opacity: .95; }
 .flow { max-width: 560px; margin: 0 auto; }
 .gauge-fill { stroke: url(#g-soc); stroke-dasharray: 0 540; transition: stroke-dasharray .8s cubic-bezier(.2,.7,.2,1); }
 .gauge-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 6px; }
@@ -239,7 +238,7 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .tabbar button .ic { width: 23px; height: 23px; }
 .tabbar button.active .ic { stroke-width: 2.1; }
 .gauge circle { stroke-width: 15; }
-.gauge-fill { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-2) 55%, transparent)); }
+.gauge-fill { filter: drop-shadow(0 0 5px rgba(0, 0, 0, .18)); }
 .gauge-value { font-size: 56px; font-weight: 750; }
 .hero-stat .v { font-size: 28px; }
 .hero-stat .k, .tile .k { font-size: 11px; font-weight: 600; }

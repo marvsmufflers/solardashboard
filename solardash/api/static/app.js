@@ -76,8 +76,7 @@
   function setGauge(soc, floor) {
     const total = 405; // 270° of 2πr(540)
     $("#gauge-fill").style.strokeDasharray = `${Math.max(0, Math.min(100, soc || 0)) / 100 * total} 540`;
-    // thin marker at the planner's floor
-    const f = $("#gauge-floor"); f.style.strokeDasharray = "1.6 538.4"; f.style.strokeDashoffset = `${-((floor || 0) / 100 * total - 0.8)}`;
+
   }
   function renderHome(inv, tot, invOk) {
     const soc = tot.battery_state_of_charge;
