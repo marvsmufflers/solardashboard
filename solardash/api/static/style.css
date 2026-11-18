@@ -384,3 +384,10 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .plan-manual { margin: 0 0 6px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); font-size: 13.5px; }
 .flow .nsoc { font-size: 13px; font-weight: 700; text-anchor: middle; fill: var(--batt); font-variant-numeric: tabular-nums; }
 .flow .node.idle .nsoc { fill: var(--batt); }
+.flow .bglyph .b-body { fill: none; stroke: var(--text); stroke-width: 1.6; opacity: .8; }
+.flow .bglyph .b-cap { fill: var(--text); opacity: .8; }
+.flow .bglyph .b-fill { fill: color-mix(in srgb, var(--batt) 65%, transparent); stroke: none; transition: height .6s, y .6s; }
+.flow .bglyph .b-fill.warn { fill: color-mix(in srgb, var(--warn) 75%, transparent); }
+.flow .bglyph .b-fill.bad { fill: color-mix(in srgb, var(--bad) 75%, transparent); }
+.flow .bglyph .b-bolt { fill: var(--text); stroke: none; }
+.flow #fn-batt-label { text-transform: none; letter-spacing: .02em; font-variant-numeric: tabular-nums; }

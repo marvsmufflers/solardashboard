@@ -115,7 +115,14 @@
     arc("fa-gen", tot.generator_running ? gen : 0, (pp.generator_dc_kw || 2.4) * 1000);
     arc("fa-load", load, 6000);
     arc("fa-batt", bp, 6000);
-    $("#fn-soc").textContent = soc == null ? "–" : `${Math.round(soc)} %`;
+    // battery glyph: fills with the charge, bolt while charging (like Solar Assistant)
+    { const f = $("#fb-fill"), lvl = soc == null ? 0 : Math.max(0, Math.min(100, soc)), h = 19 * lvl / 100;
+      f.setAttribute("height", h.toFixed(2)); f.setAttribute("y", (5.5 + 19 - h).toFixed(2));
+      const fl = state.forecast_summary?.params?.soc_floor ?? 25;
+      f.setAttribute("class", "b-fill" + (soc != null && soc <= fl ? " bad" : soc != null && soc <= fl + 15 ? " warn" : ""));
+      $("#fb-bolt").style.display = bp != null && bp > 20 ? "" : "none";
+      const v = tot.battery_voltage;
+      $("#fn-batt-label").textContent = soc == null ? "battery" : `${Math.round(soc)} %${v != null ? ` · ${v.toFixed(1)} V` : ""}`; }
     const idle = (sel, on) => document.querySelector(sel)?.classList.toggle("idle", !on);
     idle(".n-pv", pv > 20); idle(".n-gen", tot.generator_running); idle(".n-batt", bp != null && Math.abs(bp) > 20);
     const line = (id, cls, p, rev) => { const el = $("#" + id); el.className = `fl ${cls} ${p != null && Math.abs(p) > 20 ? "on" : ""} ${rev ? "rev" : ""}`; };
