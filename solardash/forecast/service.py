@@ -24,6 +24,7 @@ from .model import (
     save_model,
 )
 from .planner import PlannerParams, parse_quiet_hours, plan_generator
+from .snow import check_cover, describe, mark_cleared
 from .scorecard import scorecard
 
 log = logging.getLogger(__name__)
@@ -182,6 +183,14 @@ class ForecastTask:
             log.warning("open-meteo: %s", self.openmeteo_error)
         self.health.stats = {"api_calls": self.openmeteo_client.calls}
 
+    def panels_cleared(self) -> dict:
+        c = mark_cleared(self.store)
+        try:
+            self.recompute()
+        except Exception as e:  # noqa: BLE001
+            log.warning("forecast after panels cleared: %s", e)
+        return c.to_dict()
+
     def _tank_left_h(self) -> float | None:
         """Fuel left in the generator the cam switch is set to (the one a planned run would use)."""
         gens = self.state.derived.get("generators", [])
@@ -219,10 +228,13 @@ class ForecastTask:
             self.model = fit_model(self.store, lat, lon, self.cfg.planner.pv_kw_peak, now=now, previous=self.model, modes=modes)
             save_model(self.store, self.model)
             self._last_fit = now
+        cover = check_cover(self.store, self.model.k_clear, now, learned=self.model.k_clear_source == "learned")
+        self.store.insert(hour_floor(now), {"forecast/panel_cover": cover.factor})
         days = self.weather.forecast if self.weather is not None else []
         mode = self.occupancy_mode()
         hours = predict_hours(self.model, lat, lon, days, hour_floor(now), self.cfg.planner.horizon_h + 1,
-                              openmeteo=self.openmeteo.by_ts() if self.openmeteo else None, mode=mode)
+                              openmeteo=self.openmeteo.by_ts() if self.openmeteo else None, mode=mode,
+                              pv_scale=cover.factor)
         # log predictions for later bias evaluation (next 48 h only)
         for h in hours[:48]:
             self.store.insert(h.ts, {"forecast/pv_power_pred": h.pv_kw * 1000.0})
@@ -235,6 +247,9 @@ class ForecastTask:
             running = any(g.get("running") for g in gens)
             elapsed = max((g.get("run_elapsed_h") or 0.0 for g in gens if g.get("running")), default=0.0)
             plan = plan_generator(float(soc), now, hours, self.params(), generator_running=running, run_elapsed_h=elapsed)
+            if cover.state in ("covered", "partial") and plan.needed:
+                plan.reason += (f" Solar forecast cut to {round(cover.factor * 100)} %: "
+                                f"the panels look {'snow-covered' if cover.state == 'covered' else 'partly covered'}.")
         obs = (self.state.weather or {}).get("current") if self.weather is not None else None
         exp_now = expected_now_kw(self.model, obs.get("solar_radiation") if obs else None)
         summary = daily_summary(hours)
@@ -247,6 +262,7 @@ class ForecastTask:
             "hours": [h.to_dict() for h in hours],
             "days": summary,
             "plan": guard_for_cam_switch(plan.to_dict(), self.cfg, self.state.derived.get("generator_active")) if plan else None,
+            "panel_cover": dict(cover.to_dict(), note=describe(cover)),
             "soc_now": soc,
             "expected_now_kw": exp_now,
             "actual_now_kw": round((self.state.inverter.get("pv_power") or 0) / 1000.0, 3) if self.state.inverter else None,
@@ -327,6 +343,11 @@ def plan_mqtt_values(forecast: dict[str, Any]) -> dict[str, Any]:
         out["forecast/pv_tomorrow_kwh"] = days[1]["pv_kwh"]
     if forecast.get("expected_now_kw") is not None:
         out["forecast/pv_expected_now_kw"] = forecast["expected_now_kw"]
+    cover = forecast.get("panel_cover") or {}
+    if cover.get("state"):
+        out["forecast/panels_covered"] = cover["state"] in ("covered", "partial")
+        if cover.get("ratio") is not None:
+            out["forecast/panel_output_percent"] = round(cover["ratio"] * 100)
     plan = forecast.get("plan")
     if plan:
         for k in ("needed", "recommended_now", "stop_recommended", "run_h", "energy_kwh", "end_soc", "start_soc",

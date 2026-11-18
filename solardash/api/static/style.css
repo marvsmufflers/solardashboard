@@ -391,3 +391,6 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .flow .bglyph .b-fill.bad { fill: color-mix(in srgb, var(--bad) 75%, transparent); }
 .flow .bglyph .b-bolt { fill: var(--text); stroke: none; }
 .flow #fn-batt-label { text-transform: none; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.cover-note { margin: 0 0 var(--gap); padding: 12px 14px; border-radius: 14px; font-size: 14px; line-height: 1.4;
+  background: color-mix(in srgb, #7cc4ff 16%, var(--card)); border: 1px solid color-mix(in srgb, #7cc4ff 45%, transparent); }
+.cover-note[hidden] { display: none; }

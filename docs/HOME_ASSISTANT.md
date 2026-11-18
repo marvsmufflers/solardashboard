@@ -160,7 +160,17 @@ Each generator device also gets:
 Press the buttons from a dashboard (or the app's Generator tab) after refuelling or changing the oil.
 A low-fuel notification is one automation away, e.g. trigger on `fuel_percent` below 25.
 
-## 6. Without MQTT (REST)
+## 6. Snow on the panels
+
+* `binary_sensor.solardash_forecast_panels_covered` — on when the array produces far less than the sky
+  should give it (battery-full hours are ignored, since the inverter throttles the panels then)
+* `sensor.solardash_forecast_panel_output_percent` — actual output as a % of expected over recent sunny hours
+* `button.solardash_panels_cleared` — press after clearing the panels; the forecast goes back to full solar
+
+While covered, the solar forecast (and so the generator plan) assumes the panels stay that way until
+sunny hours show them producing again. A "panels covered" notification is one automation away.
+
+## 7. Without MQTT (REST)
 
 If you would rather not run a broker, HA's `rest` platform can poll `/api/state` every 30 s:
 

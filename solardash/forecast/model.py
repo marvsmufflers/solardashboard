@@ -79,6 +79,9 @@ def fit_model(store: HistoryStore, lat: float, lon: float, pv_kw_peak: float, no
     pred = dict(store.query("forecast/pv_power_pred", now - 7 * 86400, now, step=3600))
 
     clear = dict(clear_sky_hourly(lat, lon, datetime.fromtimestamp(start, timezone.utc), int(days * 24) + 1))
+    # hours when the panels were known to be snow-covered say nothing about the array's capacity
+    covered = {ts for ts, f in store.query("forecast/panel_cover", start, now, step=3600) if f is not None and f < 0.9}
+    pv = {ts: w for ts, w in pv.items() if ts not in covered}
 
     # k_clear from clear-ish hours
     ratios = []
@@ -186,12 +189,13 @@ class HourForecast:
 
 
 def predict_hours(model: PvModel, lat: float, lon: float, forecast_days: list, start: float, hours: int,
-                  default_cloud: float = 0.5, openmeteo: dict | None = None, mode: str | None = None) -> list[HourForecast]:
+                  default_cloud: float = 0.5, openmeteo: dict | None = None, mode: str | None = None,
+                  pv_scale: float = 1.0) -> list[HourForecast]:
     """Hourly PV/load prediction from ``start`` for ``hours`` hours.
 
     ``openmeteo`` maps hour-start epoch -> HourlyPoint (with ``ghi``); it wins
     when present, Wunderground daypart cloud cover is the fallback, then a
-    climatological 50 % cloud.
+    climatological 50 % cloud. ``pv_scale`` derates the array (snow on the panels).
     """
     by_date = {d.date: d for d in forecast_days}
     profile = model.profile_for(mode)
@@ -217,7 +221,7 @@ def predict_hours(model: PvModel, lat: float, lon: float, forecast_days: list, s
             pv_kw = model.k_clear * (cs / 1000.0) * cloud_transmission(cloud) * model.bias
             source = "climatology"
         out.append(HourForecast(ts=ts, clear_sky_wm2=round(cs, 1), cloud=round(max(0.0, min(1.0, cloud)), 2),
-                                pv_kw=round(max(0.0, pv_kw), 3), load_kw=profile[lt.tm_hour], source=source,
+                                pv_kw=round(max(0.0, pv_kw * pv_scale), 3), load_kw=profile[lt.tm_hour], source=source,
                                 ghi_wm2=None if ghi is None else round(ghi, 1), snowfall_cm=snow, temperature_c=temp))
     return out
 

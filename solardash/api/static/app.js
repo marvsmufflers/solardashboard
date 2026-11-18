@@ -140,6 +140,8 @@
     // plan mini
     const fp = state.forecast_summary?.plan;
     const pb = $("#pm-badge");
+    { const cv = state.forecast_summary?.panel_cover, el = $("#cover-note");
+      if (el) { el.hidden = !cv?.note; if (cv?.note) el.innerHTML = `<b>${cv.state === "covered" ? "❄ Snow on the panels?" : "❄ Panels partly covered?"}</b> ${cv.note} <button class="btn sm" data-panels-cleared>Panels cleared</button>`; } }
     if (!fp) { pb.textContent = "plan"; pb.className = "badge subtle"; $("#pm-title").textContent = "No forecast yet"; $("#pm-text").textContent = state.forecast_summary?.reason || ""; }
     else {
       const [cls, title, badge] = fp.stop_recommended ? ["warn", "Stop the generator", "stop"] : fp.recommended_now ? ["warn", "Start the generator now", "start"] : fp.needed ? ["", `Generator ${when(fp.start_at)}`, "plan"] : ["ok", "No generator needed", "plan"];
@@ -378,6 +380,12 @@
       + ((tot.generator_warnings || []).map((w) => `<div class="gen" style="color:var(--warn)">⚠ ${w}</div>`).join(""));
   }
   document.addEventListener("click", async (ev) => {
+    if (!ev.target.closest("[data-panels-cleared]")) return;
+    if (!confirm("Mark the panels as cleared? The forecast goes back to full solar.")) return;
+    const r = await fetch("/api/panels/cleared", { method: "POST" });
+    toast(r.ok ? "Panels marked clear" : "Could not save");
+  });
+  document.addEventListener("click", async (ev) => {
     const b = ev.target.closest("[data-svc]"); if (!b) return;
     const what = b.dataset.svc, name = b.dataset.gen;
     if (!confirm(`${what === "refilled" ? "Mark the tank as full" : "Record an oil change"} for ${name}?`)) return;
@@ -411,7 +419,8 @@
       $("#plan-head").textContent = head; $("#plan-sub").textContent = sub;
       badge.textContent = plan.stop_recommended ? "stop" : plan.recommended_now ? "start" : plan.needed ? "scheduled" : "all good"; badge.className = "badge " + cls;
       const manual = plan.manual_generator ? `<div class="plan-manual">Cam switch is on <b>${plan.manual_generator.split(" (")[0]}</b>: no start or stop signals go to Home Assistant.</div>` : "";
-      $("#plan-warn").innerHTML = manual + (plan.needed && plan.floor_at ? `Without it the bank reaches the <b>${Math.round(prm.soc_floor)} %</b> floor ${when(plan.floor_at)}.` : "");
+      const cvn = state?.forecast_summary?.panel_cover?.note;
+      $("#plan-warn").innerHTML = manual + (cvn ? `<div class="plan-manual">❄ ${cvn}</div>` : "") + (plan.needed && plan.floor_at ? `Without it the bank reaches the <b>${Math.round(prm.soc_floor)} %</b> floor ${when(plan.floor_at)}.` : "");
       $("#plan-next").textContent = plan.next_deficit_at ? `Another run will be needed ${when(plan.next_deficit_at)}.` : "";
       $("#plan-reason").textContent = plan.reason;
       kv($("#plan-kv"), [

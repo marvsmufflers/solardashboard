@@ -151,7 +151,8 @@ class Service:
             self.mqtt = MqttPublisher(cfg.mqtt, self.state, write_setting=self.write_setting_blocking,
                                       signal_topics=topics, on_signal=self.set_generator_signal,
                                       extra_values=lambda: plan_mqtt_values(self.state.forecast),
-                                      on_occupancy=self.set_occupancy, on_service=self.generator_service)
+                                      on_occupancy=self.set_occupancy, on_service=self.generator_service,
+                                      on_panels_cleared=lambda: self.forecast.panels_cleared() if self.forecast else None)
             self.mqtt._occupancy_modes = cfg.occupancy.modes if cfg.occupancy.enabled else []
             from .state import DeviceHealth
 

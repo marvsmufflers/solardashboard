@@ -167,7 +167,9 @@ class MqttPublisher:
         extra_values: Callable[[], dict[str, Any]] | None = None,
         on_occupancy: Callable[[str], Any] | None = None,
         on_service: Callable[[str, str], Any] | None = None,
+        on_panels_cleared: Callable[[], Any] | None = None,
     ) -> None:
+        self.on_panels_cleared = on_panels_cleared
         self.extra_values = extra_values
         self.on_service = on_service
         self.on_occupancy = on_occupancy
@@ -240,6 +242,7 @@ class MqttPublisher:
         client.subscribe(f"{self.cfg.prefix}/inverter_1/+/set")
         client.subscribe(f"{self.cfg.prefix}/occupancy/set")
         client.subscribe(f"{self.cfg.prefix}/+/service")  # generator buttons: refilled / oil_changed
+        client.subscribe(f"{self.cfg.prefix}/panels/cleared")
         client.subscribe(f"{self.cfg.ha_prefix}/status")  # Home Assistant birth message
         for topic in self.signal_topics:
             client.subscribe(topic)
@@ -271,6 +274,12 @@ class MqttPublisher:
                 self.on_signal(name, val if kind == "running" else None, val if kind == "contactor" else None)
             except Exception as e:  # noqa: BLE001
                 log.warning("mqtt: signal handling failed: %s", e)
+            return
+        if msg.topic == f"{self.cfg.prefix}/panels/cleared" and self.on_panels_cleared is not None:
+            try:
+                self.on_panels_cleared()
+            except Exception as e:  # noqa: BLE001
+                log.warning("mqtt: panels cleared failed: %s", e)
             return
         parts = msg.topic.split("/")
         if len(parts) == 3 and parts[2] == "service" and parts[1].startswith("generator_") and self.on_service is not None:
@@ -418,8 +427,19 @@ class MqttPublisher:
     def occupancy_modes(self) -> list[str]:
         return list(getattr(self, "_occupancy_modes", []) or [])
 
+    def _discover_panels_button(self) -> None:
+        if not self.cfg.ha_discovery or "button:panels" in self._discovered or self._client is None or self.on_panels_cleared is None:
+            return
+        self._discovered.add("button:panels")
+        payload = {"name": "Panels cleared", "unique_id": "solardash_panels_cleared", "object_id": "solardash_panels_cleared",
+                   "icon": "mdi:snowflake-off", "command_topic": f"{self.cfg.prefix}/panels/cleared", "payload_press": "cleared",
+                   "availability_topic": self.availability_topic,
+                   "device": {"identifiers": ["solardash_forecast"], "name": "Forecast", "manufacturer": "solardash", "model": "solardash"}}
+        self._raw_publish(f"{self.cfg.ha_prefix}/button/solardash_panels_cleared/config", json.dumps(payload), retain=True)
+
     def publish_snapshot(self) -> None:
         self._discover_occupancy_switch()
+        self._discover_panels_button()
         modes = self.occupancy_modes()
         occ = (self.state.derived or {}).get("occupancy")
         if len(modes) >= 2 and occ in modes:

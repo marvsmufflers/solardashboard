@@ -24,6 +24,9 @@ Chargeverter.
 * Generator planner that minimises fuel and engine wear: simulates SOC 72 h ahead and recommends when to
   start and how long to run — fewer, longer runs, as late as is safe, never charging what the sun will
   cover; exposed on the API and MQTT for Home Assistant to act on
+* Snow detection: compares the array's output with the sunlight Open-Meteo estimated for the cabin
+  (ignoring hours with a full battery); covered panels cut the solar forecast so the generator plan
+  stops counting on sun the array can't use, until the panels produce again or "Panels cleared" is pressed
 * Fuel and oil tracking per generator: tank level from engine hours, refill warnings in the plan,
   oil-change countdown, "Tank refilled" / "Oil changed" buttons in the app and in Home Assistant
 * Scorecard: starts, run hours, kWh per hour, share of run at full current, hours at the floor and

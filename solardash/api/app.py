@@ -191,6 +191,13 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         except KeyError as e:
             raise HTTPException(404, str(e))
 
+    @app.post("/api/panels/cleared")
+    async def api_panels_cleared():
+        """Someone cleared snow off the panels."""
+        if svc.forecast is None:
+            raise HTTPException(409, "forecast not running")
+        return await asyncio.to_thread(svc.forecast.panels_cleared)
+
     @app.get("/api/weather")
     async def api_weather():
         return svc.state.weather or {"enabled": False}
