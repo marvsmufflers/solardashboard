@@ -403,7 +403,8 @@
       else { head = "No generator needed"; sub = `Lowest point ${Math.round(plan.min_soc_without)} % ${when(plan.min_soc_at)} · next ${prm.horizon_h} h`; cls = "ok"; }
       $("#plan-head").textContent = head; $("#plan-sub").textContent = sub;
       badge.textContent = plan.stop_recommended ? "stop" : plan.recommended_now ? "start" : plan.needed ? "scheduled" : "all good"; badge.className = "badge " + cls;
-      $("#plan-warn").innerHTML = plan.needed && plan.floor_at ? `Without it the bank reaches the <b>${Math.round(prm.soc_floor)} %</b> floor ${when(plan.floor_at)}.` : "";
+      const manual = plan.manual_generator ? `<div class="plan-manual">Cam switch is on <b>${plan.manual_generator.split(" (")[0]}</b>: Home Assistant won't start or stop anything. ${plan.manual_start_now ? "<b>Start it by hand now.</b>" : plan.manual_stop_now ? "<b>Stop it now.</b>" : "Runs are started by hand."}</div>` : "";
+      $("#plan-warn").innerHTML = manual + (plan.needed && plan.floor_at ? `Without it the bank reaches the <b>${Math.round(prm.soc_floor)} %</b> floor ${when(plan.floor_at)}.` : "");
       $("#plan-next").textContent = plan.next_deficit_at ? `Another run will be needed ${when(plan.next_deficit_at)}.` : "";
       $("#plan-reason").textContent = plan.reason;
       kv($("#plan-kv"), [

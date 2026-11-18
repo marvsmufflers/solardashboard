@@ -246,7 +246,7 @@ class ForecastTask:
             "params": self.params().__dict__,
             "hours": [h.to_dict() for h in hours],
             "days": summary,
-            "plan": plan.to_dict() if plan else None,
+            "plan": guard_for_cam_switch(plan.to_dict(), self.cfg, self.state.derived.get("generator_active")) if plan else None,
             "soc_now": soc,
             "expected_now_kw": exp_now,
             "actual_now_kw": round((self.state.inverter.get("pv_power") or 0) / 1000.0, 3) if self.state.inverter else None,
@@ -286,6 +286,36 @@ class ForecastTask:
         loc = self._location()
         return scorecard(self.store, loc[0] if loc else None, loc[1] if loc else None, self.cfg.planner.soc_floor,
                          self.model.k_clear if self.model else 0.0, days=days)
+
+
+def is_auto_start(g) -> bool:
+    """Can Home Assistant start this generator? Explicit flag, else: has a running signal or "auto" in its name."""
+    if getattr(g, "auto_start", None) is not None:
+        return bool(g.auto_start)
+    return bool(getattr(g, "running_topic", "")) or "auto" in g.name.lower()
+
+
+def guard_for_cam_switch(plan: dict[str, Any], cfg, active: str | None) -> dict[str, Any]:
+    """Never ask Home Assistant to start (or stop) the auto-start generator while the cam switch
+    feeds the Chargeverter from a generator it cannot control; tell the people instead."""
+    autos = [g.name for g in cfg.generators if is_auto_start(g)] or [g.name for g in cfg.generators[:1]]
+    gen = next((g for g in cfg.generators if g.name == active), None)
+    if gen is None or gen.name in autos:
+        plan["manual_generator"] = None
+        return plan
+    short = active.split(" (")[0]
+    plan["manual_generator"] = active
+    if plan.get("recommended_now"):
+        plan["reason"] = f"The cam switch is set to {short}, which has to be started by hand: start it now. " + plan["reason"]
+    elif plan.get("stop_recommended"):
+        plan["reason"] = f"Stop the {short} by hand now. " + plan["reason"]
+    elif plan.get("needed"):
+        plan["reason"] = f"The cam switch is set to {short}; this run has to be started by hand. " + plan["reason"]
+    plan["manual_start_now"] = bool(plan.get("recommended_now"))
+    plan["manual_stop_now"] = bool(plan.get("stop_recommended"))
+    plan["recommended_now"] = False
+    plan["stop_recommended"] = False
+    return plan
 
 
 def plan_mqtt_values(forecast: dict[str, Any]) -> dict[str, Any]:

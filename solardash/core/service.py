@@ -395,6 +395,18 @@ class Service:
         if prev != name:
             self.store.set_kv(ACTIVE_GENERATOR_KEY, name)
             self.store.add_event("info", "generator", f"cam switch set to {name}")
+            self.state.derived["generator_active"] = name
+            fc = self.state.forecast or {}
+            if fc.get("plan"):
+                from ..forecast.service import guard_for_cam_switch
+
+                plan = fc["plan"]
+                # undo a previous guard before re-applying it for the new selection
+                if plan.get("manual_generator"):
+                    plan["recommended_now"] = plan.pop("manual_start_now", False)
+                    plan["stop_recommended"] = plan.pop("manual_stop_now", False)
+                guard_for_cam_switch(plan, self.cfg, name)
+                self.state.bus.publish("total", None)
         return name
 
     # -- fuel and oil ----------------------------------------------------------------

@@ -125,3 +125,53 @@ def test_min_run_never_pushes_past_ceiling():
     hours = _hours(now, 73, lambda i: 0.0, 0.8)
     plan = plan_generator(40.0, now, hours, p)
     assert plan.needed and plan.end_soc <= p.soc_ceiling + 0.01
+
+
+def test_cam_switch_on_hand_start_generator_never_triggers_automation():
+    from solardash.config import Config
+    from solardash.forecast.service import guard_for_cam_switch, is_auto_start, plan_mqtt_values
+
+    cfg = Config()
+    outhouse, porch = cfg.generators
+    assert is_auto_start(outhouse) and not is_auto_start(porch)
+    now = int(time.time() // 3600) * 3600
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72)
+    plan = plan_generator(26.0, now, _hours(now, 73, lambda i: 0.0, 0.8), p).to_dict()
+    assert plan["recommended_now"]
+    on_outhouse = guard_for_cam_switch(dict(plan), cfg, outhouse.name)
+    assert on_outhouse["recommended_now"] and not on_outhouse["manual_generator"]
+    on_porch = guard_for_cam_switch(dict(plan), cfg, porch.name)
+    assert on_porch["recommended_now"] is False and on_porch["manual_start_now"] is True
+    assert "by hand" in on_porch["reason"]
+    mq = plan_mqtt_values({"available": True, "plan": on_porch})
+    assert mq["plan/recommended_now"] is False and mq["plan/stop_recommended"] is False
+    # a running porch generator never makes HA "stop" the outhouse one either
+    running = plan_generator(89.8, now, _hours(now, 73, lambda i: 0.0, 0.3), p, generator_running=True, run_elapsed_h=5).to_dict()
+    assert running["stop_recommended"]
+    assert guard_for_cam_switch(dict(running), cfg, porch.name)["stop_recommended"] is False
+
+
+async def test_switching_dropdown_to_porch_clears_recommendation_immediately(tmp_path):
+    from solardash.config import Config
+    from solardash.core.service import Service
+
+    cfg = Config(simulate=True)
+    cfg.history.path = str(tmp_path / "s.db")
+    svc = Service(cfg)
+    svc.state.forecast = {"available": True, "plan": {"needed": True, "recommended_now": True, "stop_recommended": False,
+                                                       "reason": "Start now.", "manual_generator": None}}
+    svc.set_active_generator("Porch generator")
+    assert svc.state.forecast["plan"]["recommended_now"] is False
+    svc.set_active_generator("Outhouse generator (auto-start)")
+    assert svc.state.forecast["plan"]["recommended_now"] is True
+
+
+def test_first_generator_is_auto_start_when_none_is_marked():
+    from solardash.config import Config, GeneratorConfig
+    from solardash.forecast.service import guard_for_cam_switch
+
+    cfg = Config()
+    cfg.generators = [GeneratorConfig("Outhouse"), GeneratorConfig("Porch")]
+    plan = {"needed": True, "recommended_now": True, "stop_recommended": False, "reason": "x"}
+    assert guard_for_cam_switch(dict(plan), cfg, "Outhouse")["recommended_now"] is True
+    assert guard_for_cam_switch(dict(plan), cfg, "Porch")["recommended_now"] is False

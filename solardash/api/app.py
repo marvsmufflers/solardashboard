@@ -169,6 +169,8 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
             raise HTTPException(404, str(e))
         svc._track_generators()
         svc.state.bus.publish("total", None)
+        if svc.forecast is not None:  # refresh the plan's wording for the new selection
+            asyncio.get_running_loop().run_in_executor(None, svc.forecast.recompute)
         return {"active": name}
 
     @app.put("/api/generators/{name}/signal")

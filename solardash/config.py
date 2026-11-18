@@ -62,9 +62,12 @@ class ChargeverterConfig:
 
 
 @dataclass
-class GeneratorConfig:
+class GeneratorConfig:  # noqa: D101
     name: str = "Generator"
     notes: str = ""
+    # Can Home Assistant start this one? Only then do "recommended now" / "stop recommended" turn on while
+    # the cam switch is set to it. None = guess: it has a running-signal topic or "auto" in its name.
+    auto_start: bool | None = None
     tank_hours: float = 8.0  # run time on a full tank at the Chargeverter load
     oil_change_h: float = 50.0  # oil change interval (engine hours); short for cold-weather duty
     # Optional external "running" signal (e.g. a 12 V sense wire read by a
@@ -170,7 +173,7 @@ class Config:
     chargeverter: ChargeverterConfig = field(default_factory=ChargeverterConfig)
     # The generators that can feed the Chargeverter (one at a time, via the cam switch).
     generators: list[GeneratorConfig] = field(default_factory=lambda: [
-        GeneratorConfig("Outhouse generator (auto-start)", "Honda EU3000is, remote start",
+        GeneratorConfig("Outhouse generator (auto-start)", "Honda EU3000is, remote start", auto_start=True,
                         running_topic="solardash/generator/outhouse/running",
                         contactor_topic="solardash/generator/outhouse/contactor"),
         GeneratorConfig("Porch generator", "Honda EU3000is, plugged in during winter stays"),
