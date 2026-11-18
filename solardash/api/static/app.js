@@ -115,7 +115,7 @@
     arc("fa-gen", tot.generator_running ? gen : 0, (pp.generator_dc_kw || 2.4) * 1000);
     arc("fa-load", load, 6000);
     arc("fa-batt", bp, 6000);
-    $("#fn-batt-label").textContent = soc == null ? "battery" : `battery ${Math.round(soc)} %`;
+    $("#fn-soc").textContent = soc == null ? "–" : `${Math.round(soc)} %`;
     const idle = (sel, on) => document.querySelector(sel)?.classList.toggle("idle", !on);
     idle(".n-pv", pv > 20); idle(".n-gen", tot.generator_running); idle(".n-batt", bp != null && Math.abs(bp) > 20);
     const line = (id, cls, p, rev) => { const el = $("#" + id); el.className = `fl ${cls} ${p != null && Math.abs(p) > 20 ? "on" : ""} ${rev ? "rev" : ""}`; };

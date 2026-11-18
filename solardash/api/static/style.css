@@ -382,3 +382,5 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .svc-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn.sm { padding: 5px 10px; font-size: 13px; border-radius: 9px; }
 .plan-manual { margin: 0 0 6px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); font-size: 13.5px; }
+.flow .nsoc { font-size: 13px; font-weight: 700; text-anchor: middle; fill: var(--batt); font-variant-numeric: tabular-nums; }
+.flow .node.idle .nsoc { fill: var(--batt); }
