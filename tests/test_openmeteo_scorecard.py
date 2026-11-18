@@ -61,19 +61,43 @@ def _hours(start, n, pv_kw, load_kw):
     return [HourForecast(ts=start + 3600 * i, clear_sky_wm2=0, cloud=0.3, pv_kw=pv_kw(i), load_kw=load_kw) for i in range(n)]
 
 
-def test_planner_storm_target_vs_normal_target():
+def test_planner_leaves_room_for_tomorrows_sun():
+    """Sun tomorrow: charge only what is needed to get there, not up to the ceiling."""
     now = int(time.time() // 3600) * 3600
-    p = PlannerParams(battery_kwh=15.36, horizon_h=72, soc_target=50, soc_target_storm=80, storm_lookahead_h=36)
-    # light overnight load and sun in a few hours: the usual short run (<= 50 %) is enough
-    sunny = _hours(now, 73, lambda i: 4.0 if 9 <= (i % 24) <= 15 else 0.0, 0.2)
-    plan = plan_generator(36.0, now, sunny, p)
-    assert plan.needed and plan.end_soc <= 50.0
-    assert "past the usual" not in plan.reason
-    # storm: no sun for three days -> allowed to charge deeper than 50 %
-    storm = _hours(now, 73, lambda i: 0.1 if 10 <= (i % 24) <= 14 else 0.0, 0.9)
-    plan2 = plan_generator(38.0, now, storm, p)
-    assert plan2.needed and plan2.end_soc > 50.0 and plan2.end_soc <= 80.0
-    assert "past the usual" in plan2.reason
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72)
+    sunny = _hours(now, 73, lambda i: 4.0 if 9 <= (i % 24) <= 15 else 0.0, 0.3)
+    plan = plan_generator(30.0, now, sunny, p)
+    assert plan.needed and plan.run_h >= p.min_run_h - 0.01
+    assert plan.end_soc < 60.0  # the sun does the rest
+    assert max(s for _, s in plan.planned) <= 100.0
+
+
+def test_planner_one_long_run_before_a_dark_spell():
+    """No sun for days: one long run (more charge) instead of several short ones, capped at the ceiling and the tank."""
+    now = int(time.time() // 3600) * 3600
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72)
+    dark = _hours(now, 73, lambda i: 0.1 if 10 <= (i % 24) <= 14 else 0.0, 0.25)
+    plan = plan_generator(30.0, now, dark, p)
+    assert plan.needed and plan.end_soc > 60.0 and plan.end_soc <= p.soc_ceiling + 0.01
+    assert plan.run_h <= p.max_run_h + 0.01
+
+
+def test_running_generator_respects_min_run():
+    now = int(time.time() // 3600) * 3600
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72)
+    sunny = _hours(now, 73, lambda i: 4.0 if 9 <= (i % 24) <= 15 else 0.0, 0.3)
+    early = plan_generator(60.0, now, sunny, p, generator_running=True, run_elapsed_h=0.5)
+    assert not early.stop_recommended  # only half an hour in: keep going until the engine is properly hot
+    late = plan_generator(89.6, now, sunny, p, generator_running=True, run_elapsed_h=4.0)
+    assert late.stop_recommended  # at the ceiling
+
+
+def test_refill_warning_when_tank_is_short():
+    now = int(time.time() // 3600) * 3600
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72, tank_left_h=0.5)
+    dark = _hours(now, 73, lambda i: 0.0, 0.4)
+    plan = plan_generator(30.0, now, dark, p)
+    assert plan.needed and "Refill first" in plan.reason
 
 
 def test_scorecard(tmp_path):
@@ -95,9 +119,9 @@ def test_scorecard(tmp_path):
     assert abs(today["hours_at_floor"] - 0.5) < 0.01 and today["soc_min"] == 28.0
 
 
-def test_min_run_never_pushes_past_storm_cap():
+def test_min_run_never_pushes_past_ceiling():
     now = int(time.time() // 3600) * 3600
-    p = PlannerParams(battery_kwh=15.36, horizon_h=72, soc_target=50, soc_target_storm=80, generator_dc_kw=30.0, min_run_h=1.0)
+    p = PlannerParams(battery_kwh=15.36, horizon_h=72, generator_dc_kw=30.0, min_run_h=1.0)
     hours = _hours(now, 73, lambda i: 0.0, 0.8)
     plan = plan_generator(40.0, now, hours, p)
-    assert plan.needed and plan.end_soc <= 80.0
+    assert plan.needed and plan.end_soc <= p.soc_ceiling + 0.01

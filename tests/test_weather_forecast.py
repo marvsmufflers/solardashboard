@@ -134,7 +134,7 @@ def test_no_generator_when_sunny():
     hours = _hours(now, 49, lambda i: 3.0 if 8 <= (i % 24) <= 16 else 0.0, 0.5)
     plan = plan_generator(70.0, now, hours, _params())
     assert plan.needed is False and plan.recommended_now is False
-    assert plan.min_soc_without > 35
+    assert plan.min_soc_without > 28
 
 
 def test_generator_planned_just_in_time_and_sized():
@@ -144,12 +144,13 @@ def test_generator_planned_just_in_time_and_sized():
     plan = plan_generator(45.0, now, hours, _params())
     assert plan.needed is True
     assert plan.start_at is not None and plan.start_at >= now
-    # it should not start immediately: SOC 45 with 35 % floor+margin gives a few hours of headroom
+    p = _params()
+    # it should not start immediately: SOC 45 with a 25 % floor gives hours of headroom (just in time)
     assert plan.start_at > now + 3600
-    assert plan.start_soc is not None and plan.start_soc >= 34.0
-    assert plan.min_soc_without < 35
-    assert min(s for t, s in plan.planned if t <= plan.end_at) >= 29.9  # never below the floor through the run
-    assert plan.end_soc <= 90 and plan.run_h >= 1.0
+    assert plan.start_soc is not None and p.soc_floor <= plan.start_soc <= p.soc_floor + p.soc_margin + 2
+    assert plan.min_soc_without < p.soc_floor
+    assert min(s for t, s in plan.planned if t <= plan.end_at) >= p.soc_floor - 0.1  # never below the floor through the run
+    assert plan.end_soc <= p.soc_ceiling and plan.run_h >= p.min_run_h - 0.01
     assert "Start" in plan.reason
     assert plan.next_deficit_at is not None and "another run" in plan.reason  # sustained deficit
 
@@ -157,7 +158,7 @@ def test_generator_planned_just_in_time_and_sized():
 def test_generator_start_now_when_already_low():
     now = int(time.time() // 3600) * 3600
     hours = _hours(now, 49, lambda i: 0.0, 1.0)
-    plan = plan_generator(33.0, now, hours, _params())
+    plan = plan_generator(27.0, now, hours, _params())
     assert plan.needed and plan.recommended_now and plan.start_at == now
     assert plan.run_h <= 8.0
 

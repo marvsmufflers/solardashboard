@@ -326,14 +326,14 @@
     const p = palette(), r = "48h";
     const s = await fetchSeries(["total/battery_state_of_charge", "total/generator_power"], r);
     const { labels, cols } = align(s, ["total/battery_state_of_charge", "total/generator_power"]);
-    const prm = state?.forecast_summary?.params || {}, floor = prm.soc_floor ?? 30, target = prm.soc_target ?? 50;
+    const prm = state?.forecast_summary?.params || {}, floor = prm.soc_floor ?? 25, target = prm.soc_ceiling ?? 90;
     draw("chart-soc", labels, [
       { label: "State of charge", data: cols[0], borderColor: p.batt, backgroundColor: alpha(p.batt, 0.16), fill: "origin", order: 1 },
       { label: "Generator running", data: cols[1].map((v) => (v > 0 ? 100 : null)), borderWidth: 0, backgroundColor: alpha(p.gen, 0.16), fill: "origin", stepped: true, spanGaps: false, order: 3 },
       { label: `_floor`, data: labels.map(() => floor), borderColor: alpha(css("--bad"), 0.7), borderDash: [5, 5], borderWidth: 1.2, order: 2 },
       { label: `_target`, data: labels.map(() => target), borderColor: alpha(p.muted, 0.7), borderDash: [2, 4], borderWidth: 1.2, order: 2 },
     ], baseOpts({ yMin: 0, yMax: 100, fmtY: (v) => `${v} %`, tooltipFmt: (v) => `${Math.round(v)} %` }), STEP[r]);
-    $("#soc-note").innerHTML = `<span class="key k-floor"></span> generator start ${floor} % <span class="key k-target"></span> normal stop ${target} %`;
+    $("#soc-note").innerHTML = `<span class="key k-floor"></span> floor ${floor} % <span class="key k-target"></span> generator never charges past ${target} %`;
   }
   async function loadBattChart() {
     const p = palette(), r = "48h", n = (state?.batteries || []).length || 3;
@@ -360,9 +360,23 @@
       genSelectBuilt = true;
     }
     if (document.activeElement !== sel && tot.generator_active) sel.value = tot.generator_active;
-    $("#gen-list").innerHTML = gens.map((g) => `<div class="gen"><div class="n">${g.name}<small>${g.running ? (g.warming_up ? "running · warming up" : "running") : "off"} · ${g.source === "signal" ? "sense wire" : "inferred"}${g.contactor != null ? ` · contactor ${g.contactor ? "closed" : "open"}` : ""}${g.active ? " · on cam switch" : ""}</small></div><div class="h">${hours(g.runtime_today_h)}<small>today · ${genTotals[g.name] != null ? genTotals[g.name].toFixed(1) + " h total" : ""}</small></div></div>`).join("")
+    $("#gen-list").innerHTML = gens.map((g) => {
+      const fuelCls = g.fuel_pct == null ? "" : g.fuel_pct <= 15 ? "bad" : g.fuel_pct <= 35 ? "warn" : "ok";
+      const oilCls = g.oil_due_in_h == null ? "" : g.oil_due_in_h <= 0 ? "bad" : g.oil_due_in_h <= 5 ? "warn" : "";
+      return `<div class="gen"><div class="n">${g.name}<small>${g.running ? (g.warming_up ? "running · warming up" : "running") : "off"} · ${g.source === "signal" ? "sense wire" : "inferred"}${g.contactor != null ? ` · contactor ${g.contactor ? "closed" : "open"}` : ""}${g.active ? " · on cam switch" : ""}</small></div><div class="h">${hours(g.runtime_today_h)}<small>today · ${genTotals[g.name] != null ? genTotals[g.name].toFixed(1) + " h total" : ""}</small></div>
+        ${g.fuel_pct != null ? `<div class="gen-svc"><div class="fuel"><div class="fuel-k">Fuel <b>${g.fuel_pct} %</b> · about ${hours(g.fuel_left_h)} left</div><div class="fuel-bar"><span class="${fuelCls}" style="width:${g.fuel_pct}%"></span></div></div>
+          <div class="oil ${oilCls}">Oil change ${g.oil_due_in_h > 0 ? `in <b>${Math.round(g.oil_due_in_h)} h</b>` : `<b>due now</b>`} <small>every ${g.oil_change_h} h</small></div>
+          <div class="svc-btns"><button class="btn sm" data-svc="refilled" data-gen="${g.name}">Tank refilled</button><button class="btn sm" data-svc="oil_changed" data-gen="${g.name}">Oil changed</button></div></div>` : ""}</div>`;
+    }).join("")
       + ((tot.generator_warnings || []).map((w) => `<div class="gen" style="color:var(--warn)">⚠ ${w}</div>`).join(""));
   }
+  document.addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-svc]"); if (!b) return;
+    const what = b.dataset.svc, name = b.dataset.gen;
+    if (!confirm(`${what === "refilled" ? "Mark the tank as full" : "Record an oil change"} for ${name}?`)) return;
+    const r = await fetch(`/api/generators/${encodeURIComponent(name)}/${what}`, { method: "POST" });
+    toast(r.ok ? (what === "refilled" ? "Tank marked full" : "Oil change recorded") : "Could not save");
+  });
   async function loadGenerators() {
     try { const d = await (await fetch("/api/generators")).json(); genTotals = Object.fromEntries(d.generators.map((g) => [g.name, g.runtime_total_h])); if (state) renderGenLive(state.total || {}); } catch (e) {}
     loadScorecard();
@@ -389,11 +403,11 @@
       else { head = "No generator needed"; sub = `Lowest point ${Math.round(plan.min_soc_without)} % ${when(plan.min_soc_at)} · next ${prm.horizon_h} h`; cls = "ok"; }
       $("#plan-head").textContent = head; $("#plan-sub").textContent = sub;
       badge.textContent = plan.stop_recommended ? "stop" : plan.recommended_now ? "start" : plan.needed ? "scheduled" : "all good"; badge.className = "badge " + cls;
-      $("#plan-warn").innerHTML = plan.needed && plan.min_soc_without < prm.soc_floor ? `Without it the bank reaches <b>${Math.round(plan.min_soc_without)} %</b> ${when(plan.min_soc_at)}.` : "";
+      $("#plan-warn").innerHTML = plan.needed && plan.floor_at ? `Without it the bank reaches the <b>${Math.round(prm.soc_floor)} %</b> floor ${when(plan.floor_at)}.` : "";
       $("#plan-next").textContent = plan.next_deficit_at ? `Another run will be needed ${when(plan.next_deficit_at)}.` : "";
       $("#plan-reason").textContent = plan.reason;
       kv($("#plan-kv"), [
-        ["Energy from generator", plan.needed ? fmt(plan.energy_kwh, 1, "kWh") : "–"], ["Start / stop at", `${prm.soc_floor} % / ${prm.soc_target} % (storm ${prm.soc_target_storm} %)`],
+        ["Energy from generator", plan.needed ? fmt(plan.energy_kwh, 1, "kWh") : "–"], ["Floor / ceiling", `${prm.soc_floor} % / ${prm.soc_ceiling} %`], ["Run length", `${prm.min_run_h}–${prm.max_run_h} h`],
         ["Battery used for planning", fmt(prm.battery_kwh, 1, "kWh")], ["Load profile", f.occupancy ? `${f.occupancy}${f.model.load_profiles?.[f.occupancy] ? "" : " (learning)"}` : "overall"],
       ]);
     }
@@ -506,8 +520,9 @@
         <div class="field"><label for="su-display-rain">Rain</label><select id="su-display-rain" data-sec="display" data-key="rain" data-kind="text">${["in", "mm"].map((u) => `<option ${d.sections.display.values.rain === u ? "selected" : ""}>${u}</option>`).join("")}</select></div></div></div>
       <div class="su-group"><h3>Solar, battery, generator</h3><div class="su-grid">
         ${fld("planner", "pv_kw_peak", "Solar array (kW)", "number", pl.pv_kw_peak)}<div class="field"><label for="su-gen-amps">Chargeverter charge current (A)</label><input id="su-gen-amps" type="number" inputmode="decimal" step="any" data-sec="planner" data-key="generator_dc_kw" data-kind="amps" value="${pl.generator_dc_kw != null ? Math.round(pl.generator_dc_kw * 1000 / 52) : ""}" placeholder="46"></div>
-        ${fld("planner", "soc_floor", "Start generator at (%)", "number", pl.soc_floor)}${fld("planner", "soc_target", "Stop at (%)", "number", pl.soc_target)}
-        ${fld("planner", "soc_target_storm", "Stop at before storms (%)", "number", pl.soc_target_storm)}${fld("planner", "quiet_hours", "Quiet hours", "list", pl.quiet_hours, { ph: "22:00-07:00" })}</div></div>
+        ${fld("planner", "soc_floor", "Lowest battery charge (%)", "number", pl.soc_floor)}${fld("planner", "soc_ceiling", "Generator never charges past (%)", "number", pl.soc_ceiling)}
+        ${fld("planner", "min_run_h", "Shortest run (h)", "number", pl.min_run_h)}${fld("planner", "quiet_hours", "Quiet hours", "list", pl.quiet_hours, { ph: "22:00-07:00" })}</div>
+        <p class="su-note">The planner picks when to start and how long to run to use the least fuel and engine hours: fewer, longer runs, and never charging what the sun will cover.</p></div>
       <div class="su-group"><h3>Devices</h3>
         <div class="su-grid">${fld("inverter", "port", "Inverter port", "text", inv.port, { list: "port-list", wide: true })}</div>
         <div class="su-rows" id="su-bats" style="margin-top:10px">${d.sections.batteries.values.map(batRow).join("")}</div>
@@ -521,7 +536,7 @@
         <div class="su-grid" style="margin-top:8px">${fld("mqtt", "host", "Broker address (Home Assistant's IP)", "text", m.host, { ph: "192.168.1.50" })}${fld("mqtt", "port", "Port", "number", m.port)}${fld("mqtt", "username", "Username", "text", m.username)}${fld("mqtt", "password", "Password", "password", m.password)}</div></div>
       <div class="su-group su-adv"><details><summary>Advanced</summary><div class="su-grid" style="margin-top:8px">
         ${fld("inverter", "baud", "Inverter baud", "number", inv.baud)}${fld("inverter", "unit", "Inverter Modbus ID", "number", inv.unit)}${fld("inverter", "poll_interval", "Inverter poll (s)", "number", inv.poll_interval)}${fld("planner", "battery_kwh", "Battery kWh (blank = auto)", "number", pl.battery_kwh)}
-        ${fld("planner", "soc_margin", "Planning margin (%)", "number", pl.soc_margin)}${fld("planner", "storm_lookahead_h", "Storm lookahead (h)", "number", pl.storm_lookahead_h)}${fld("planner", "min_run_h", "Min run (h)", "number", pl.min_run_h)}${fld("planner", "max_run_h", "Max run (h)", "number", pl.max_run_h)}
+        ${fld("planner", "soc_margin", "Planning margin (%)", "number", pl.soc_margin)}${fld("planner", "storm_lookahead_h", "Lookahead for extra starts (h)", "number", pl.storm_lookahead_h)}${fld("planner", "start_cost_h", "Cost of one start (engine h)", "number", pl.start_cost_h)}${fld("planner", "max_run_h", "Longest run (h)", "number", pl.max_run_h)}
         ${fld("planner", "horizon_h", "Forecast horizon (h)", "number", pl.horizon_h)}${fld("planner", "charge_efficiency", "Charge efficiency", "number", pl.charge_efficiency)}${fld("weather", "units", "WU units (e/m)", "text", w.units)}${fld("mqtt", "prefix", "MQTT topic prefix", "text", m.prefix)}
         ${fld("occupancy", "modes", "Occupancy modes", "list", oc.modes)}${fld("occupancy", "default", "Default occupancy", "text", oc.default)}
         ${fld("weather", "openmeteo_enabled", "Open-Meteo forecast", "bool", w.openmeteo_enabled, { wide: true })}${fld("mqtt", "ha_discovery", "Home Assistant discovery", "bool", m.ha_discovery, { wide: true })}${fld("planner", "enabled", "Generator planner", "bool", pl.enabled, { wide: true })}

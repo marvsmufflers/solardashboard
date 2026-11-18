@@ -65,6 +65,8 @@ class ChargeverterConfig:
 class GeneratorConfig:
     name: str = "Generator"
     notes: str = ""
+    tank_hours: float = 8.0  # run time on a full tank at the Chargeverter load
+    oil_change_h: float = 50.0  # oil change interval (engine hours); short for cold-weather duty
     # Optional external "running" signal (e.g. a 12 V sense wire read by a
     # Waveshare Modbus relay in Home Assistant). When set, run hours for this
     # generator come from the signal instead of Chargeverter-output inference.
@@ -98,15 +100,15 @@ class WeatherConfig:
 @dataclass
 class PlannerConfig:
     enabled: bool = True
-    soc_floor: float = 30.0  # never plan to go below this
-    soc_target: float = 50.0  # normal stop point (the owner's 30 -> 50 % routine)
-    soc_target_storm: float = 80.0  # allowed stop point when the forecast shows no solar surplus coming
-    storm_lookahead_h: float = 36.0  # ... i.e. when the bank would need another run within this many hours
-    soc_margin: float = 5.0  # planning margin above the floor
-    generator_dc_kw: float = 2.4  # Chargeverter DC output from one EU3000is (~2.8 kW AC)
+    soc_floor: float = 25.0  # never plan to go below this
+    soc_ceiling: float = 90.0  # never charge past this with the generator (LFP charging tapers above it)
+    storm_lookahead_h: float = 48.0  # a second start needed within this window counts against a short run
+    soc_margin: float = 3.0  # planning margin above the floor
+    generator_dc_kw: float = 1.56  # Chargeverter DC output (30 A x ~52 V)
     charge_efficiency: float = 0.94
-    min_run_h: float = 1.0
-    max_run_h: float = 8.0
+    min_run_h: float = 1.5  # shorter runs never get the engine and oil fully hot
+    max_run_h: float = 8.0  # one tank
+    start_cost_h: float = 0.5  # fuel and wear of a cold start + warm-up, in engine hours
     quiet_hours: list[str] = field(default_factory=list)  # e.g. ["22:00-07:00"]
     horizon_h: int = 72
     pv_kw_peak: float = 6.0  # array size; used until enough history has been learned
@@ -273,10 +275,10 @@ def _check_types(cls, values: dict[str, Any]) -> dict[str, Any]:
 
 def _check_ranges(section: str, obj) -> None:
     if section == "planner":
-        if not (0 <= obj.soc_floor < obj.soc_target <= 100):
-            raise ValueError("need 0 <= soc_floor < soc_target <= 100")
-        if not (obj.soc_target <= obj.soc_target_storm <= 100):
-            raise ValueError("soc_target_storm must be between soc_target and 100")
+        if not (0 <= obj.soc_floor < obj.soc_ceiling <= 100):
+            raise ValueError("need 0 <= soc_floor < soc_ceiling <= 100")
+        if not (0.5 <= obj.min_run_h <= obj.max_run_h <= 24):
+            raise ValueError("need 0.5 <= min_run_h <= max_run_h <= 24")
         if not 0.3 <= obj.generator_dc_kw <= 8:
             raise ValueError("generator charge must be between 6 and 150 A (0.3–8 kW); an EU3000is into a Chargeverter is about 40–55 A")
         if obj.generator_dc_kw <= 0 or obj.pv_kw_peak <= 0 or obj.max_run_h < obj.min_run_h or obj.horizon_h < 12:
@@ -349,6 +351,11 @@ def apply_overrides(cfg: "Config", overrides: dict[str, Any]) -> "Config":
     for section, values in overrides.items():
         if section not in OVERRIDABLE_SECTIONS:
             continue
+        # The old fixed 30 -> 50 % routine is replaced by the efficiency planner: drop its saved values
+        if section == "planner" and isinstance(values, dict):
+            values = {k: v for k, v in values.items()
+                      if k not in ("soc_target", "soc_target_storm") and not (k == "soc_floor" and v == 30.0)
+                      and not (k in ("min_run_h", "storm_lookahead_h", "soc_margin") and v in (1.0, 36.0, 5.0))}
         # Setup used to save the old 5 s poll default along with everything else; let the faster default apply
         if section == "inverter" and isinstance(values, dict) and values.get("poll_interval") == OLD_POLL_DEFAULT:
             values = {k: v for k, v in values.items() if k != "poll_interval"}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime
@@ -67,6 +68,9 @@ class Service:
         self._today_energy_at = 0.0
         self._runtime: dict[str, float] = {}  # generator name -> hours today
         self._running_prev: dict[str, bool | None] = {}
+        self._run_started: dict[str, float] = {}  # generator name -> when the current run began
+        self._wear: dict[str, dict[str, float]] | None = None  # name -> {"fuel": h since refill, "oil": h since oil change}
+        self._wear_saved = 0.0
         self._raw_running: bool = False
         self._raw_since: float = 0.0
         self._last_track: float | None = None
@@ -147,7 +151,7 @@ class Service:
             self.mqtt = MqttPublisher(cfg.mqtt, self.state, write_setting=self.write_setting_blocking,
                                       signal_topics=topics, on_signal=self.set_generator_signal,
                                       extra_values=lambda: plan_mqtt_values(self.state.forecast),
-                                      on_occupancy=self.set_occupancy)
+                                      on_occupancy=self.set_occupancy, on_service=self.generator_service)
             self.mqtt._occupancy_modes = cfg.occupancy.modes if cfg.occupancy.enabled else []
             from .state import DeviceHealth
 
@@ -393,6 +397,40 @@ class Service:
             self.store.add_event("info", "generator", f"cam switch set to {name}")
         return name
 
+    # -- fuel and oil ----------------------------------------------------------------
+    def _wear_for(self, name: str) -> dict[str, float]:
+        if self._wear is None:
+            try:
+                self._wear = json.loads(self.store.get_kv("generator_wear") or "{}")
+            except ValueError:
+                self._wear = {}
+        return self._wear.setdefault(name, {"fuel": 0.0, "oil": 0.0})
+
+    def _save_wear(self) -> None:
+        if self._wear is not None:
+            self.store.set_kv("generator_wear", json.dumps(self._wear))
+            self._wear_saved = time.time()
+
+    def _wear_summary(self, name: str) -> dict:
+        g = self._generator_by_name(name)
+        tank = g.tank_hours if g else 8.0
+        oil = g.oil_change_h if g else 50.0
+        w = self._wear_for(name)
+        left = max(0.0, tank - w["fuel"])
+        return {"fuel_left_h": round(left, 2), "fuel_pct": round(100.0 * left / tank) if tank > 0 else None,
+                "tank_hours": tank, "oil_hours": round(w["oil"], 1), "oil_due_in_h": round(oil - w["oil"], 1),
+                "oil_change_h": oil}
+
+    def generator_service(self, name: str, what: str) -> dict:
+        """Record a refill ("refilled") or an oil change ("oil_changed")."""
+        if name not in self.generator_names:
+            raise KeyError(f"unknown generator {name!r}")
+        key = {"refilled": "fuel", "oil_changed": "oil"}[what]
+        self._wear_for(name)[key] = 0.0
+        self._save_wear()
+        self.store.add_event("info", "generator", f"{name}: {'tank refilled' if key == 'fuel' else 'oil changed'}")
+        return self._wear_summary(name)
+
     def set_generator_signal(self, name: str, running: bool | None = None, contactor: bool | None = None) -> dict:
         """Record an external signal (from Home Assistant via MQTT or REST)."""
         if name not in self.generator_names:
@@ -481,9 +519,15 @@ class Service:
                 running = delivering and n == supplier
                 source = "inferred"
                 contactor = None
+            wear = self._wear_for(n)
             if running:
                 self._runtime[n] = self._runtime.get(n, 0.0) + dt_h
+                wear["fuel"] += dt_h
+                wear["oil"] += dt_h
                 any_running = True
+                self._run_started.setdefault(n, now)
+            else:
+                self._run_started.pop(n, None)
             prev = self._running_prev.get(n)
             if prev is not None and prev != running:
                 self.store.add_event("info", "generator", f"{n} {'started' if running else 'stopped'} ({source})")
@@ -497,8 +541,12 @@ class Service:
                 "name": n, "active": n == active, "running": running, "source": source,
                 "contactor": contactor, "warming_up": warming_up, "delivering": bool(running and (delivering or (contactor and n == active))),
                 "runtime_today_h": round(self._runtime.get(n, 0.0), 2),
+                "run_elapsed_h": round((now - self._run_started[n]) / 3600.0, 2) if n in self._run_started else 0.0,
+                **self._wear_summary(n),
                 "signal_age_s": None if sig is None else round(now - sig["updated"]),
             })
+        if any_running and now - self._wear_saved > 60:
+            self._save_wear()
         d["generator_running"] = any_running
         d["generator_active"] = active
         d["generator_supplying"] = next((g["name"] for g in gens if g["running"]), None)

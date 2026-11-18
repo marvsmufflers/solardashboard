@@ -166,8 +166,10 @@ class MqttPublisher:
         on_signal: Callable[[str, bool | None, bool | None], Any] | None = None,
         extra_values: Callable[[], dict[str, Any]] | None = None,
         on_occupancy: Callable[[str], Any] | None = None,
+        on_service: Callable[[str, str], Any] | None = None,
     ) -> None:
         self.extra_values = extra_values
+        self.on_service = on_service
         self.on_occupancy = on_occupancy
         self.cfg = cfg
         self.state = state
@@ -237,6 +239,7 @@ class MqttPublisher:
         client.publish(self.availability_topic, "online", retain=True)
         client.subscribe(f"{self.cfg.prefix}/inverter_1/+/set")
         client.subscribe(f"{self.cfg.prefix}/occupancy/set")
+        client.subscribe(f"{self.cfg.prefix}/+/service")  # generator buttons: refilled / oil_changed
         client.subscribe(f"{self.cfg.ha_prefix}/status")  # Home Assistant birth message
         for topic in self.signal_topics:
             client.subscribe(topic)
@@ -268,6 +271,15 @@ class MqttPublisher:
                 self.on_signal(name, val if kind == "running" else None, val if kind == "contactor" else None)
             except Exception as e:  # noqa: BLE001
                 log.warning("mqtt: signal handling failed: %s", e)
+            return
+        parts = msg.topic.split("/")
+        if len(parts) == 3 and parts[2] == "service" and parts[1].startswith("generator_") and self.on_service is not None:
+            gens = self.state.derived.get("generators", [])
+            try:
+                g = gens[int(parts[1].split("_", 1)[1]) - 1]
+                self.on_service(g["name"], payload.strip('"').strip().lower())
+            except (ValueError, IndexError, KeyError) as e:
+                log.warning("mqtt: generator service %r on %s failed: %s", payload, msg.topic, e)
             return
         if msg.topic == f"{self.cfg.prefix}/occupancy/set" and self.on_occupancy is not None:
             try:
@@ -387,6 +399,22 @@ class MqttPublisher:
         }
         self._raw_publish(f"{self.cfg.ha_prefix}/switch/solardash_cabin_occupied/config", json.dumps(payload), retain=True)
 
+    def _discover_service_buttons(self, i: int, name: str) -> None:
+        """"Tank refilled" and "Oil changed" buttons for each generator."""
+        key = f"button:generator_{i}"
+        if not self.cfg.ha_discovery or key in self._discovered or self._client is None:
+            return
+        self._discovered.add(key)
+        for what, label, icon in (("refilled", "Tank refilled", "mdi:gas-station"), ("oil_changed", "Oil changed", "mdi:oil")):
+            uid = f"solardash_generator_{i}_{what}"
+            payload = {
+                "name": label, "unique_id": uid, "object_id": uid, "icon": icon,
+                "command_topic": f"{self.cfg.prefix}/generator_{i}/service", "payload_press": what,
+                "availability_topic": self.availability_topic,
+                "device": {"identifiers": [f"solardash_generator_{i}"], "name": name, "manufacturer": "solardash", "model": "solardash"},
+            }
+            self._raw_publish(f"{self.cfg.ha_prefix}/button/{uid}/config", json.dumps(payload), retain=True)
+
     def occupancy_modes(self) -> list[str]:
         return list(getattr(self, "_occupancy_modes", []) or [])
 
@@ -434,9 +462,13 @@ class MqttPublisher:
                 continue
             self._emit("total", "Totals", key, val)
         for i, g in enumerate(st.derived.get("generators", []), 1):
-            for key in ("name", "active", "running", "source", "contactor", "warming_up", "delivering", "runtime_today_h"):
+            for key in ("name", "active", "running", "source", "contactor", "warming_up", "delivering", "runtime_today_h",
+                        "fuel_left_h", "oil_due_in_h"):
                 if g.get(key) is not None:
                     self._emit(f"generator_{i}", g["name"], key, g[key])
+            if g.get("fuel_pct") is not None:
+                self._emit(f"generator_{i}", g["name"], "fuel_percent", g["fuel_pct"])
+            self._discover_service_buttons(i, g["name"])
         w = (st.weather or {}).get("current") or {}
         for key, val in w.items():
             if key in ("ts", "raw") or val is None or isinstance(val, (dict, list)):

@@ -370,3 +370,14 @@ body { background: radial-gradient(1200px 500px at 50% -200px, color-mix(in srgb
 .flow .node circle.arc { fill: none !important; stroke-width: 5; stroke-linecap: round; transform: rotate(-90deg); transition: stroke-dasharray .6s ease; stroke-dasharray: 0 999; }
 .flow .n-pv circle.arc { stroke: var(--pv); } .flow .n-gen circle.arc { stroke: var(--gen); }
 .flow .n-batt circle.arc { stroke: var(--batt); } .flow .n-home circle.arc { stroke: var(--load); }
+
+/* generator fuel / oil */
+.gen-svc { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 2px; }
+.gen-svc .fuel-k, .gen-svc .oil { font-size: 13px; color: var(--muted); } .gen-svc b { color: var(--text); }
+.gen-svc .oil small { margin-left: 6px; }
+.gen-svc .oil.warn b { color: var(--warn); } .gen-svc .oil.bad b { color: var(--bad); }
+.fuel-bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 5px; }
+.fuel-bar span { display: block; height: 100%; border-radius: 99px; background: var(--ok); transition: width .5s; }
+.fuel-bar span.warn { background: var(--warn); } .fuel-bar span.bad { background: var(--bad); }
+.svc-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn.sm { padding: 5px 10px; font-size: 13px; border-radius: 9px; }

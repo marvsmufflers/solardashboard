@@ -21,9 +21,11 @@ Chargeverter.
   Underground station for measured conditions
 * PV forecast model that learns the array's clear-sky capacity from history and self-corrects against
   what the forecast predicted; load profiles learned per occupancy mode (occupied / away)
-* Generator planner built around a 30 → 50 % routine: simulates SOC 72 h ahead, recommends when to
-  start the outhouse generator and how long to run, allows a deeper charge only when no solar surplus
-  is coming; exposed on the API and MQTT for Home Assistant to act on
+* Generator planner that minimises fuel and engine wear: simulates SOC 72 h ahead and recommends when to
+  start and how long to run — fewer, longer runs, as late as is safe, never charging what the sun will
+  cover; exposed on the API and MQTT for Home Assistant to act on
+* Fuel and oil tracking per generator: tank level from engine hours, refill warnings in the plan,
+  oil-change countdown, "Tank refilled" / "Oil changed" buttons in the app and in Home Assistant
 * Scorecard: starts, run hours, kWh per hour, share of run at full current, hours at the floor and
   curtailed solar per day, so the strategy can be judged on data
 * SQLite history with hourly rollups; MQTT output using Solar Assistant's topic names plus
@@ -105,13 +107,12 @@ An RS485 link to its BMS RJ45 is optional (`chargeverter.mode`): `sniff` shows i
    factor from forecast-vs-actual. Load profiles are learned by hour of day, separately for each
    occupancy mode; set the cabin's mode in the header dropdown, `PUT /api/occupancy`, or MQTT
    `<prefix>/occupancy/set` (a Home Assistant presence automation can do it).
-3. **Planner.** Simulates SOC for `planner.horizon_h` hours and recommends one run: as late as possible
-   so solar is used first and the Chargeverter runs at full current from a low SOC (where an EU3000is
-   is most fuel-efficient), sized to carry the bank to the next solar surplus, stopped at `soc_target`
-   (50 % by default, matching the 30 → 50 routine). When the forecast shows no surplus coming within
-   `storm_lookahead_h` it may charge to `soc_target_storm` instead, so one longer run replaces several
-   short ones. Quiet hours and min/max run length are respected; while the generator runs it advises
-   when to stop.
+3. **Planner.** Simulates SOC for `planner.horizon_h` hours. The Chargeverter fixes the generator's
+   load, so each engine hour costs the same fuel and wear; the planner picks the stop point that needs
+   the fewest engine hours, counting a start (`start_cost_h`) for every later run a shorter charge would
+   cause and counting charge the sun would have replaced as wasted. Runs start as late as is safe,
+   last `min_run_h`–`max_run_h` (one tank), never charge past `soc_ceiling`, and avoid quiet hours.
+   While the generator runs it advises when to stop. The plan warns when the tank needs a refill first.
 4. **Scorecard.** `/api/scorecard` and the Forecast tab show per day: starts, run hours, kWh delivered,
    kWh per hour, share of run time at full current, hours at the floor, and curtailed solar.
 

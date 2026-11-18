@@ -182,14 +182,20 @@ class ForecastTask:
             log.warning("open-meteo: %s", self.openmeteo_error)
         self.health.stats = {"api_calls": self.openmeteo_client.calls}
 
+    def _tank_left_h(self) -> float | None:
+        """Fuel left in the generator the cam switch is set to (the one a planned run would use)."""
+        gens = self.state.derived.get("generators", [])
+        g = next((x for x in gens if x.get("active")), None)
+        return g.get("fuel_left_h") if g else None
+
     def params(self) -> PlannerParams:
         pc = self.cfg.planner
         return PlannerParams(
-            soc_floor=pc.soc_floor, soc_target=pc.soc_target, soc_target_storm=pc.soc_target_storm,
+            soc_floor=pc.soc_floor, soc_ceiling=pc.soc_ceiling,
             storm_lookahead_h=pc.storm_lookahead_h, soc_margin=pc.soc_margin,
             generator_dc_kw=pc.generator_dc_kw, charge_efficiency=pc.charge_efficiency, min_run_h=pc.min_run_h,
-            max_run_h=pc.max_run_h, quiet_hours=parse_quiet_hours(pc.quiet_hours), horizon_h=pc.horizon_h,
-            battery_kwh=self._battery_kwh(),
+            max_run_h=pc.max_run_h, start_cost_h=pc.start_cost_h, quiet_hours=parse_quiet_hours(pc.quiet_hours),
+            horizon_h=pc.horizon_h, battery_kwh=self._battery_kwh(), tank_left_h=self._tank_left_h(),
         )
 
     def recompute(self, now: float | None = None) -> dict:
@@ -225,8 +231,10 @@ class ForecastTask:
             soc = self.state.inverter.get("battery_soc")
         plan = None
         if self.cfg.planner.enabled and soc is not None:
-            running = any(g.get("running") for g in self.state.derived.get("generators", []))
-            plan = plan_generator(float(soc), now, hours, self.params(), generator_running=running)
+            gens = self.state.derived.get("generators", [])
+            running = any(g.get("running") for g in gens)
+            elapsed = max((g.get("run_elapsed_h") or 0.0 for g in gens if g.get("running")), default=0.0)
+            plan = plan_generator(float(soc), now, hours, self.params(), generator_running=running, run_elapsed_h=elapsed)
         obs = (self.state.weather or {}).get("current") if self.weather is not None else None
         exp_now = expected_now_kw(self.model, obs.get("solar_radiation") if obs else None)
         summary = daily_summary(hours)

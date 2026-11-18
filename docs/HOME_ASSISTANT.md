@@ -148,7 +148,19 @@ Only works with `inverter.allow_writes: true`. Publish to `solar_assistant/inver
 for example `solar_assistant/inverter_1/max_charge_current/set` with payload `80`. Setting keys are
 listed on the Settings tab and at `/api/settings`.
 
-## 5. Without MQTT (REST)
+## 5. Fuel and oil
+
+Each generator device also gets:
+
+* `sensor.solardash_generator_<n>_fuel_percent` and `..._fuel_left_h` — tank level estimated from engine
+  hours since the last refill (`tank_hours`, default 8 h per tank at the Chargeverter load)
+* `sensor.solardash_generator_<n>_oil_due_in_h` — hours until the next oil change (`oil_change_h`, default 50)
+* `button.solardash_generator_<n>_refilled` and `button.solardash_generator_<n>_oil_changed`
+
+Press the buttons from a dashboard (or the app's Generator tab) after refuelling or changing the oil.
+A low-fuel notification is one automation away, e.g. trigger on `fuel_percent` below 25.
+
+## 6. Without MQTT (REST)
 
 If you would rather not run a broker, HA's `rest` platform can poll `/api/state` every 30 s:
 

@@ -179,6 +179,16 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
         except KeyError as e:
             raise HTTPException(404, str(e))
 
+    @app.post("/api/generators/{name}/{what}")
+    async def api_generator_service(name: str, what: str):
+        """Record a refill (what=refilled) or an oil change (what=oil_changed)."""
+        if what not in ("refilled", "oil_changed"):
+            raise HTTPException(404, "use refilled or oil_changed")
+        try:
+            return await asyncio.to_thread(svc.generator_service, name, what)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
     @app.get("/api/weather")
     async def api_weather():
         return svc.state.weather or {"enabled": False}

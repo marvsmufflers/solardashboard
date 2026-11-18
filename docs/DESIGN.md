@@ -157,14 +157,18 @@ solardash therefore offers two modes on a dedicated RS485 adapter wired to that 
   last 7 days using the predictions logged at forecast time (`forecast/pv_power_pred`); `k_meas`
   (per measured W/m²) gives an "expected now" so under-performance (snow, shading) is visible.
   Load profile: median load by local hour over 14 days.
-* **Planner** (`forecast/planner.py`): 15-minute SOC simulation over 72 h; if SOC would cross
-  floor + margin, searches start times from the crossing backwards (latest feasible wins) and sizes
-  the run to the drawdown that follows it. The stop point is `soc_target` (50 %, the owner's routine)
-  unless the bank would need another run within `storm_lookahead_h` even after charging to it; then
-  `soc_target_storm` (80 %) is allowed so one longer run replaces several short ones. Min/max run
-  length and quiet hours are enforced, a follow-up run is flagged, and while a generator is running
-  the stop SOC is advised. Output is advisory: `plan/recommended_now`, `plan/stop_recommended`,
-  times and reason on the API and MQTT.
+* **Planner** (`forecast/planner.py`): 15-minute SOC simulation over 72 h. The generator's load is fixed
+  by the Chargeverter, so the objective is engine hours (fuel and wear). If SOC would cross floor +
+  margin, the latest safe start is found (a minimum run from there keeps SOC above the floor and stays
+  out of quiet hours); then every stop point from a minimum run up to `soc_ceiling` is scored:
+  run hours + later run hours + `start_cost_h` per later start (later starts beyond `storm_lookahead_h`
+  weigh half) + charge left above the floor when the sun refills the bank (fuel the sun would have
+  replaced). The cheapest wins; ties go to the lower stop. While a generator runs, the same search
+  advises the stop, never before `min_run_h`. Output is advisory: `plan/recommended_now`,
+  `plan/stop_recommended`, times and reason on the API and MQTT.
+* **Fuel and oil**: engine hours since the last refill / oil change per generator (kv `generator_wear`),
+  tank level = `tank_hours` − hours since refill; reset from the app, `POST /api/generators/<name>/refilled`
+  or `/oil_changed`, or the Home Assistant buttons.
 * **Scorecard** (`forecast/scorecard.py`): per-day starts, run hours, inferred kWh, kWh/h, share of
   run time ≥ 85 % of peak Chargeverter output, hours at/below the floor, curtailed solar (full bank
   while the clear-sky model says the array could have made ≥ 30 % more).

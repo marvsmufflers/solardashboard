@@ -26,7 +26,7 @@ def test_overrides_apply_and_load(tmp_path):
     path = overrides_path(cfg)
     save_overrides(path, {"planner": {"soc_floor": 35.0}, "generators": [{"name": "Only one"}], "weather": {"latitude": 39.5, "longitude": -105.0}, "bogus": {"x": 1}})
     apply_overrides(cfg, json.load(open(path)))
-    assert cfg.planner.soc_floor == 35.0 and cfg.planner.soc_target == 50.0  # untouched default kept
+    assert cfg.planner.soc_floor == 35.0 and cfg.planner.soc_ceiling == 90.0  # untouched default kept
     assert [g.name for g in cfg.generators] == ["Only one"]
     assert cfg.weather.latitude == 39.5
     # load_config picks them up when the yaml points at the same data dir
@@ -66,7 +66,7 @@ async def test_setup_api_updates_and_reconfigures(tmp_path):
             # validation
             assert (await c.put("/api/setup", json={"section": "generators", "values": [{"name": "A"}, {"name": "A"}]})).status_code == 400
             assert (await c.put("/api/setup", json={"section": "planner", "values": {"soc_floor": "abc"}})).status_code == 400
-            assert (await c.put("/api/setup", json={"section": "planner", "values": {"soc_floor": 60}})).status_code == 400  # above target
+            assert (await c.put("/api/setup", json={"section": "planner", "values": {"soc_floor": 95}})).status_code == 400  # above the ceiling
             assert (await c.put("/api/setup", json={"section": "weather", "values": {"latitude": 95}})).status_code == 400
             assert cfg.planner.soc_floor == 35  # rejected writes changed nothing
             assert (await c.put("/api/setup", json={"section": "nope", "values": {}})).status_code == 404
@@ -80,7 +80,7 @@ def test_bad_saved_value_does_not_block_startup(tmp_path):
     cfg = Config()
     cfg.history.path = str(tmp_path / "x.db")
     apply_overrides(cfg, {"planner": {"generator_dc_kw": 30.0, "soc_floor": 33.0}, "generators": [{"name": "A"}, {"name": "A"}]})
-    assert cfg.planner.generator_dc_kw == 2.4 and cfg.planner.soc_floor == 33.0  # bad value dropped, good one kept
+    assert cfg.planner.generator_dc_kw == 1.56 and cfg.planner.soc_floor == 33.0  # bad value dropped, good one kept
     assert len(cfg.generators) == 2  # invalid list ignored, defaults kept
 
 

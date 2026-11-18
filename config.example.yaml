@@ -51,7 +51,7 @@ chargeverter:
 
 # Generators that can feed the Chargeverter. Only one runs at a time (cam switch);
 # pick the active one in the web UI and solardash accrues run hours to it.
-generators:
+generators:   # each also takes tank_hours (default 8) and oil_change_h (default 50)
   - name: Outhouse generator (auto-start)
     notes: Honda EU3000is, remote start
     # Home Assistant knows when this one runs (12 V sense wire on a Waveshare
@@ -83,15 +83,18 @@ weather:
 
 planner:
   enabled: true
-  soc_floor: 30          # never plan to go below
-  soc_target: 50         # normal stop point (30 -> 50 % routine; keeps room for tomorrow's sun)
-  soc_target_storm: 80   # may charge this far when no solar surplus is coming within storm_lookahead_h
-  storm_lookahead_h: 36
-  soc_margin: 5
-  generator_dc_kw: 2.4   # what the Chargeverter delivers from one EU3000is
+  # The Chargeverter fixes the generator's load, so every engine hour costs about the same fuel and wear.
+  # The planner minimises engine hours and starts: fewer, longer runs, timed as late as is safe, sized so
+  # it never charges what the sun will cover.
+  soc_floor: 25          # never plan to go below
+  soc_ceiling: 90        # never charge past this with the generator (LFP charging tapers above it)
+  min_run_h: 1.5         # shorter runs never get the engine and oil fully hot
+  max_run_h: 8.0         # one tank
+  start_cost_h: 0.5      # fuel + wear of a cold start and warm-up, in engine hours
+  storm_lookahead_h: 48  # later starts beyond this are weighed at half (forecast uncertainty)
+  soc_margin: 3
+  generator_dc_kw: 1.56  # Chargeverter DC output: 30 A x ~52 V
   charge_efficiency: 0.94
-  min_run_h: 1.0
-  max_run_h: 8.0
   quiet_hours: []        # e.g. ["22:00-07:00"] if the outhouse generator must not run at night
   horizon_h: 72
   pv_kw_peak: 6.0        # array size, used until the model has learned from history
