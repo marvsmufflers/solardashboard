@@ -91,7 +91,42 @@ BINARY_CLASS = {"running": "running", "online": "connectivity", "answering": "co
                 "charge_fet_on": "power", "discharge_fet_on": "power"}
 
 
+# Exact names, units and classes for metrics whose key alone says it badly (weather station fields).
+# (friendly name, unit, device_class, state_class, icon)
+METRIC_META: dict[str, tuple[str, str | None, str | None, str | None, str | None]] = {
+    "temperature_c": ("Temperature", "°C", "temperature", "measurement", None),
+    "dewpoint_c": ("Dew point", "°C", "temperature", "measurement", None),
+    "humidity": ("Humidity", "%", "humidity", "measurement", None),
+    "precip_rate_mm_h": ("Rain rate", "mm/h", "precipitation_intensity", "measurement", None),
+    "precip_total_mm": ("Rain today", "mm", "precipitation", "total_increasing", None),
+    "pressure_hpa": ("Pressure", "hPa", "atmospheric_pressure", "measurement", None),
+    "solar_radiation": ("Solar radiation", "W/m²", "irradiance", "measurement", None),
+    "uv": ("UV index", None, None, "measurement", "mdi:sun-wireless"),
+    "wind_kph": ("Wind speed", "km/h", "wind_speed", "measurement", None),
+    "wind_gust_kph": ("Wind gust", "km/h", "wind_speed", "measurement", None),
+    "wind_dir": ("Wind direction", "°", None, "measurement", "mdi:compass-outline"),
+    "elevation_m": ("Elevation", "m", "distance", None, None),
+}
+UNIT_SUFFIXES = ("_c", "_f", "_kph", "_mph", "_mm", "_h", "_hpa", "_kw", "_kwh", "_w", "_pct", "_wm2")
+
+
+def _pretty_name(metric: str) -> str:
+    """Friendly name from a metric key, without the unit suffix (HA shows the unit itself)."""
+    if metric in METRIC_META:
+        return METRIC_META[metric][0]
+    m = metric
+    for suf in UNIT_SUFFIXES:
+        if m.endswith(suf) and len(m) > len(suf) + 1:
+            m = m[: -len(suf)]
+            break
+    name = m.replace("_-_", " ").replace("_", " ").strip().capitalize()
+    return " ".join("PV" if w.lower() == "pv" else "SOC" if w.lower() == "soc" else w for w in name.split(" "))
+
+
 def _unit_and_class(metric: str) -> tuple[str | None, str | None, str | None]:
+    if metric in METRIC_META:
+        _, unit, dc, sc, _icon = METRIC_META[metric]
+        return unit, dc, sc
     m = metric
     if m.endswith("_h") or "runtime" in m or m.endswith("run_h"):
         return "h", "duration", "total_increasing" if "runtime" in m else None
@@ -348,7 +383,7 @@ class MqttPublisher:
             return
         self._discovered.add(state_topic)
         uid = f"solardash_{device_id}_{metric}".replace("-", "_").replace("/", "_").replace(" ", "_")
-        pretty = metric.replace("_-_", " ").replace("_", " ").strip().capitalize()
+        pretty = _pretty_name(metric)
         payload: dict[str, Any] = {
             "name": pretty,
             "unique_id": uid,
@@ -378,6 +413,8 @@ class MqttPublisher:
                     payload["state_class"] = state_class
             elif isinstance(value, str) and metric.endswith("_at"):
                 payload["device_class"] = "timestamp"
+        if metric in METRIC_META and METRIC_META[metric][4]:
+            payload["icon"] = METRIC_META[metric][4]
         if diagnostic or any(h in metric for h in DIAGNOSTIC_HINTS):
             payload["entity_category"] = "diagnostic"
         self._raw_publish(f"{self.cfg.ha_prefix}/{component}/{uid}/config", json.dumps(payload), retain=True)
