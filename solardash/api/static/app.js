@@ -109,12 +109,12 @@
     const pv = invOk ? inv.pv_power : null, load = invOk ? tot.load_power : null, gen = tot.generator_power;
     $("#fn-pv").textContent = fmtW(pv); $("#fn-load").textContent = fmtW(load); $("#fn-gen").textContent = tot.generator_running ? fmtW(gen) : (gen == null ? "–" : "off"); $("#fn-batt").textContent = bp == null ? "–" : fmtW(Math.abs(bp));
     $("#fn-gen-label").textContent = (tot.generator_supplying || tot.generator_active || "generator").split(" ")[0].toLowerCase();
-    // ring gauges: solar vs array peak, generator vs charger output, load vs inverter rating, battery = state of charge
+    // ring gauges: solar vs array peak, generator vs charger output, load vs inverter rating, battery power vs 6 kW
     const pp = state.forecast_summary?.params || {};
     arc("fa-pv", pv, (pp.pv_kw_peak || 6) * 1000);
     arc("fa-gen", tot.generator_running ? gen : 0, (pp.generator_dc_kw || 2.4) * 1000);
     arc("fa-load", load, 6000);
-    arc("fa-batt", soc, 100);
+    arc("fa-batt", bp, 6000);
     $("#fn-batt-label").textContent = soc == null ? "battery" : `battery ${Math.round(soc)} %`;
     const idle = (sel, on) => document.querySelector(sel)?.classList.toggle("idle", !on);
     idle(".n-pv", pv > 20); idle(".n-gen", tot.generator_running); idle(".n-batt", bp != null && Math.abs(bp) > 20);
