@@ -410,6 +410,38 @@ class Service:
                 self.state.bus.publish("total", None)
         return name
 
+    # -- importing older history ----------------------------------------------------
+    def import_status(self) -> dict:
+        st = dict(getattr(self, "_import_state", None) or {"running": False})
+        from ..storage.importer import import_dir
+
+        folder = import_dir(self.cfg.history.path)
+        st["waiting"] = sorted(p.name for p in folder.glob("*.csv*") if not p.name.endswith(".imported")) if folder.is_dir() else []
+        st["folder"] = "data/import"
+        return st
+
+    def start_import(self) -> dict:
+        import threading
+
+        from ..storage.importer import run_import
+
+        if (getattr(self, "_import_state", None) or {}).get("running"):
+            return self.import_status()
+        self._import_state = {"running": True, "started": time.time()}
+
+        def work():
+            try:
+                res = run_import(self.store, self.cfg.history.path)
+                self._import_state = {"running": False, "finished": time.time(), **res}
+                if self.forecast is not None:
+                    self.forecast._last_fit = 0.0  # relearn from the longer history  # noqa: SLF001
+            except Exception as e:  # noqa: BLE001
+                log.exception("history import: %s", e)
+                self._import_state = {"running": False, "finished": time.time(), "message": f"Import failed: {e}"}
+
+        threading.Thread(target=work, name="history-import", daemon=True).start()
+        return self.import_status()
+
     # -- fuel and oil ----------------------------------------------------------------
     def _wear_for(self, name: str) -> dict[str, float]:
         if self._wear is None:

@@ -550,6 +550,10 @@
         <div class="su-grid" style="margin-top:8px">${fld("weather", "station_id", "Station ID", "text", w.station_id, { ph: "KCOxxxxx" })}${fld("weather", "api_key", "API key", "password", w.api_key)}</div></div>
       <div class="su-group"><h3>Home Assistant / MQTT (optional)</h3>${fld("mqtt", "enabled", "Publish to MQTT", "bool", m.enabled)}<div class="su-note" id="mqtt-status"></div>
         <div class="su-grid" style="margin-top:8px">${fld("mqtt", "host", "Broker address (Home Assistant's IP)", "text", m.host, { ph: "192.168.1.50" })}${fld("mqtt", "port", "Port", "number", m.port)}${fld("mqtt", "username", "Username", "text", m.username)}${fld("mqtt", "password", "Password", "password", m.password)}</div></div>
+      <div class="su-group"><h3>Older history (optional)</h3>
+        <p class="su-note">To bring in history from before this app, e.g. the cleaned Solar Assistant export: in File Station, put
+        <b>cabin_1min.csv.gz</b> in the project's <b>data/import</b> folder (create it if needed), then press Import. Nothing the app recorded itself is overwritten.</p>
+        <div class="svc-btns" style="margin-top:8px"><button class="btn" type="button" id="su-import">Import</button><span class="su-note" id="su-import-status"></span></div></div>
       <div class="su-group su-adv"><details><summary>Advanced</summary><div class="su-grid" style="margin-top:8px">
         ${fld("inverter", "baud", "Inverter baud", "number", inv.baud)}${fld("inverter", "unit", "Inverter Modbus ID", "number", inv.unit)}${fld("inverter", "poll_interval", "Inverter poll (s)", "number", inv.poll_interval)}${fld("planner", "battery_kwh", "Battery kWh (blank = auto)", "number", pl.battery_kwh)}
         ${fld("planner", "soc_margin", "Planning margin (%)", "number", pl.soc_margin)}${fld("planner", "storm_lookahead_h", "Lookahead for extra starts (h)", "number", pl.storm_lookahead_h)}${fld("planner", "start_cost_h", "Cost of one start (engine h)", "number", pl.start_cost_h)}${fld("planner", "max_run_h", "Longest run (h)", "number", pl.max_run_h)}
@@ -557,6 +561,16 @@
         ${fld("occupancy", "modes", "Occupancy modes", "list", oc.modes)}${fld("occupancy", "default", "Default occupancy", "text", oc.default)}
         ${fld("weather", "openmeteo_enabled", "Open-Meteo forecast", "bool", w.openmeteo_enabled, { wide: true })}${fld("mqtt", "ha_discovery", "Home Assistant discovery", "bool", m.ha_discovery, { wide: true })}${fld("planner", "enabled", "Generator planner", "bool", pl.enabled, { wide: true })}
       </div></details></div>`;
+    const impStatus = async () => {
+      try {
+        const st = await (await fetch("/api/history/import")).json(), el = $("#su-import-status"); if (!el) return;
+        el.textContent = st.running ? "Importing… this can take a few minutes." : st.message ? st.message + (st.errors?.length ? " " + st.errors.join("; ") : "")
+          : st.waiting?.length ? `Waiting: ${st.waiting.join(", ")}` : "No files waiting in data/import.";
+        if (st.running) setTimeout(impStatus, 3000);
+      } catch (e) {}
+    };
+    impStatus();
+    $("#su-import").onclick = async () => { await fetch("/api/history/import", { method: "POST" }); impStatus(); };
     const wire = (boxId, addId, rowFn, blank) => {
       const box = $(boxId);
       box.addEventListener("click", (e) => { if (e.target.classList.contains("rm")) e.target.closest(".su-row").remove(); });

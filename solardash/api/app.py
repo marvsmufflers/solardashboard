@@ -239,6 +239,15 @@ def create_app(cfg: Config, service: Service | None = None) -> FastAPI:
                          for s in OVERRIDABLE_SECTIONS},
         }
 
+    @app.get("/api/history/import")
+    async def api_import_status():
+        return svc.import_status()
+
+    @app.post("/api/history/import")
+    async def api_import_start():
+        """Import CSVs waiting in data/import/ (the cleaned Solar Assistant export). Runs in the background."""
+        return svc.start_import()
+
     @app.get("/api/setup/ports")
     async def api_setup_ports():
         """Serial ports visible inside the container, and which config entry uses each."""
