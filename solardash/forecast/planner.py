@@ -116,7 +116,8 @@ def simulate(soc0: float, start: float, hours: dict[int, HourForecast], p: Plann
 
 
 def _sim(soc0: float, start: float, hours: dict[int, HourForecast], p: PlannerParams,
-         gen_start: float | None = None, end_soc: float = 100.0) -> tuple[list[tuple[int, float]], float | None, float]:
+         gen_start: float | None = None, end_soc: float = 100.0,
+         stop_after_run: bool = False) -> tuple[list[tuple[int, float]], float | None, float]:
     """SOC trajectory; the generator runs from gen_start until end_soc or max_run_h.
     Returns (trajectory, gen_end, spilled_kwh) where spilled is solar that could not be stored."""
     soc, t = soc0, start
@@ -139,6 +140,8 @@ def _sim(soc0: float, start: float, hours: dict[int, HourForecast], p: PlannerPa
         traj.append((int(t), soc))
         if running and (soc >= end_soc or t - gen_start >= p.max_run_h * 3600):
             gen_end = t
+            if stop_after_run:
+                break
     if gen_start is not None and gen_end is None:
         gen_end = min(horizon, gen_start + p.max_run_h * 3600)
     return traj, gen_end, spilled
@@ -226,18 +229,35 @@ def plan_generator(soc_now: float, now: float, forecast: list[HourForecast], p: 
 
     # Latest safe start: walk back from the floor crossing, first slot where a minimum run keeps the bank above the floor.
     t_cross = next(t for t, s in baseline if s < floor_m)
-    t_start = (t_cross // STEP_S) * STEP_S
+    base_at = dict(baseline)
+
+    def feasible(ts: float) -> tuple[float, float] | None:
+        if _in_quiet(ts, p.quiet_hours):
+            return None
+        soc_at_start = next((s for t, s in baseline if t >= ts), soc_now)
+        low = min(p.soc_ceiling, soc_at_start + p.min_run_h * gph)
+        # before the start the bank follows the baseline; only the run itself needs simulating
+        if any(s < p.soc_floor - 0.01 for t, s in baseline if t <= ts):
+            return None
+        traj, gen_end, _ = _sim(base_at.get(int(ts), soc_at_start), ts, hours, p, ts, low, stop_after_run=True)
+        quiet = any(_in_quiet(t, p.quiet_hours) for t in range(int(ts), int(gen_end), STEP_S))
+        return (ts, low) if not quiet and min(s for t, s in traj) >= p.soc_floor - 0.01 else None
+
+    # walk back from the crossing an hour at a time, then refine to the latest feasible 15-minute slot
+    t_cross_slot = (t_cross // STEP_S) * STEP_S
     chosen = None
+    t_start = t_cross_slot
     while t_start >= now:
-        if not _in_quiet(t_start, p.quiet_hours):
-            soc_at_start = next((s for t, s in baseline if t >= t_start), soc_now)
-            low = min(p.soc_ceiling, soc_at_start + p.min_run_h * gph)
-            traj, gen_end, _ = _sim(soc_now, now, hours, p, t_start, low)
-            quiet = any(_in_quiet(t, p.quiet_hours) for t in range(int(t_start), int(gen_end), STEP_S))
-            if not quiet and min(s for t, s in traj if t <= gen_end) >= p.soc_floor - 0.01:
-                chosen = (t_start, low)
-                break
-        t_start -= STEP_S
+        chosen = feasible(t_start)
+        if chosen:
+            for later in range(int(t_start) + 3 * STEP_S, int(t_start), -STEP_S):
+                if later <= t_cross_slot and (c := feasible(later)):
+                    chosen = c
+                    break
+            break
+        t_start -= 4 * STEP_S
+    if chosen is None and t_start < now and (c := feasible(now)):
+        chosen = c
     prefix = ""
     if chosen is None:
         chosen = (now, min(p.soc_ceiling, soc_now + p.min_run_h * gph))
