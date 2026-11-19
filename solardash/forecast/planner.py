@@ -44,6 +44,7 @@ class PlannerParams:
     min_run_h: float = 1.5
     max_run_h: float = 8.0  # one tank
     start_cost_h: float = 0.5  # a cold start + warm-up, expressed in engine hours
+    idle_kw: float = 0.066  # the inverter's own use on top of the cabin load (measured: ~66 W)
     tank_left_h: float | None = None
     quiet_hours: list[tuple[int, int]] = field(default_factory=list)  # [(start_h, end_h)] local, end exclusive, wraps
     horizon_h: int = 72
@@ -102,13 +103,11 @@ def simulate(soc0: float, start: float, hours: dict[int, HourForecast], p: Plann
     t = start
     end = start + p.horizon_h * 3600
     while t < end:
-        net = _net_kw_at(t, hours)
+        net = _net_kw_at(t, hours) - p.idle_kw
         if gen_start is not None and gen_end is not None and gen_start <= t < gen_end:
             net += p.generator_dc_kw * p.charge_efficiency
         if net > 0:
             net *= 0.97  # charge losses in battery
-        else:
-            net /= 0.95  # inverter/discharge losses
         soc += net * (STEP_S / 3600.0) / p.battery_kwh * 100.0
         soc = max(0.0, min(100.0, soc))
         t += STEP_S
@@ -127,11 +126,11 @@ def _sim(soc0: float, start: float, hours: dict[int, HourForecast], p: PlannerPa
     spilled = 0.0
     dt_h = STEP_S / 3600.0
     while t < horizon:
-        net = _net_kw_at(t, hours)
+        net = _net_kw_at(t, hours) - p.idle_kw  # the inverter's own use comes on top of the cabin load
         running = gen_start is not None and gen_start <= t and gen_end is None
         if running:
             net += p.generator_dc_kw * p.charge_efficiency
-        net = net * 0.97 if net > 0 else net / 0.95
+        net = net * 0.97 if net > 0 else net
         new = soc + net * dt_h / p.battery_kwh * 100.0
         if new > 100.0:
             spilled += (new - 100.0) / 100.0 * p.battery_kwh
@@ -156,7 +155,7 @@ def _choose_end(soc_now: float, now: float, hours: dict[int, HourForecast], p: P
     gph = _gain_per_h(p)
     # a later run also has to carry the cabin while it charges: net gain per hour is lower than gph
     loads = [h.load_kw for h in hours.values()]
-    load_pct_h = (sum(loads) / len(loads)) / 0.95 / p.battery_kwh * 100.0 if loads else 0.0
+    load_pct_h = (sum(loads) / len(loads) + p.idle_kw) / p.battery_kwh * 100.0 if loads else 0.0
     net_gph = max(1.0, gph - load_pct_h)
     best = None
     e = low

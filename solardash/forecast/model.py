@@ -49,6 +49,8 @@ class PvModel:
     load_days: int = 0
     load_profiles: dict[str, list[float]] = field(default_factory=dict)  # per occupancy mode
     load_profile_days: dict[str, int] = field(default_factory=dict)
+    inverter_idle_kw: float = 0.066  # the inverter's own draw on top of the load (learned at night)
+    idle_samples: int = 0
 
     def profile_for(self, mode: str | None) -> list[float]:
         if mode and mode in self.load_profiles:
@@ -152,10 +154,20 @@ def fit_model(store: HistoryStore, lat: float, lon: float, pv_kw_peak: float, no
         if prof is not None:
             profiles[mode] = prof
             profile_days[mode] = nd
+    # the inverter's own use: at night, what leaves the battery beyond what the cabin draws
+    bat = dict(store.query("total/battery_power", now - 14 * 86400, now, step=3600))
+    cvp = dict(store.query("total/chargeverter_power", now - 14 * 86400, now, step=3600))
+    load_h = dict(load)
+    gaps = [(-b - load_h[ts]) / 1000.0 for ts, b in bat.items()
+            if b is not None and b < -20 and ts in load_h and (pv.get(ts) or 0) < 20 and not (cvp.get(ts) or 0) > 50]
+    idle_kw = previous.inverter_idle_kw if previous else 0.066
+    if len(gaps) >= 24:
+        idle_kw = max(0.0, min(0.3, statistics.median(gaps)))
     return PvModel(k_clear=round(k_clear, 3), k_clear_source=k_source, k_meas=None if k_meas is None else round(k_meas, 5),
                    bias=round(bias, 3), samples_clear=len(ratios), samples_meas=len(meas), samples_bias=nb,
                    fitted_at=now, load_profile_kw=[round(x, 3) for x in profile], load_profile_source=l_source,
-                   load_days=ndays, load_profiles=profiles, load_profile_days=profile_days)
+                   load_days=ndays, load_profiles=profiles, load_profile_days=profile_days,
+                   inverter_idle_kw=round(idle_kw, 3), idle_samples=len(gaps))
 
 
 def save_model(store: HistoryStore, model: PvModel) -> None:

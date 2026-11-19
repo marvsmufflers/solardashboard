@@ -205,6 +205,7 @@ class ForecastTask:
             generator_dc_kw=pc.generator_dc_kw, charge_efficiency=pc.charge_efficiency, min_run_h=pc.min_run_h,
             max_run_h=pc.max_run_h, start_cost_h=pc.start_cost_h, quiet_hours=parse_quiet_hours(pc.quiet_hours),
             horizon_h=pc.horizon_h, battery_kwh=self._battery_kwh(), tank_left_h=self._tank_left_h(),
+            idle_kw=self.model.inverter_idle_kw if self.model is not None else 0.066,
         )
 
     def recompute(self, now: float | None = None) -> dict:
